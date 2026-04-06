@@ -1,0 +1,2 @@
+# Empty compiler generated dependencies file for phu-bark-fft-compressor_VST3.
+# This may be replaced when dependencies are built.
