@@ -51,10 +51,14 @@ class BarkFFTCompressor {
     void prepare(double sampleRate) {
         currentSampleRate = static_cast<float>(sampleRate);
 
-        // Pre-compute Hann window
+        // Pre-compute periodic Hann window (denominator = FFT_SIZE, not FFT_SIZE-1).
+        // The periodic form satisfies the COLA condition at 50% overlap:
+        //   w[n] + w[n + N/2] = 1  for all n
+        // which is required for perfect reconstruction when the window is applied
+        // only at the analysis stage (no synthesis window).
         for (int i = 0; i < FFT_SIZE; ++i) {
             hannWindow[i] = 0.5f * (1.0f - std::cos(2.0f * kPi * static_cast<float>(i)
-                                                     / static_cast<float>(FFT_SIZE - 1)));
+                                                     / static_cast<float>(FFT_SIZE)));
         }
 
         // Pre-compute bin-to-Bark mapping
@@ -74,8 +78,11 @@ class BarkFFTCompressor {
      * Reset all internal state (call on transport restart, etc.).
      */
     void reset() {
-        std::fill(inputRing.begin(), inputRing.end(), 0.0f);
-        std::fill(outputRing.begin(), outputRing.end(), 0.0f);
+        std::fill(inputRingMono.begin(), inputRingMono.end(), 0.0f);
+        std::fill(inputRingL.begin(),    inputRingL.end(),    0.0f);
+        std::fill(inputRingR.begin(),    inputRingR.end(),    0.0f);
+        std::fill(outputRingL.begin(),   outputRingL.end(),   0.0f);
+        std::fill(outputRingR.begin(),   outputRingR.end(),   0.0f);
         ringWritePos = 0;
         samplesUntilNextFFT = HOP_SIZE;
 
@@ -120,17 +127,21 @@ class BarkFFTCompressor {
     };
 
     StereoSample processSample(float inputL, float inputR) {
-        // Mix to mono for FFT analysis
-        float mono = (inputL + inputR) * 0.5f;
+        // Write both channels and their mono mix into the respective ring buffers.
+        // The mono mix is used for analysis (gain computation) only; the individual
+        // L/R rings are used for synthesis so per-band gains affect ONLY their own
+        // frequency band — no cross-band pumping.
+        inputRingMono[ringWritePos] = (inputL + inputR) * 0.5f;
+        inputRingL[ringWritePos]    = inputL;
+        inputRingR[ringWritePos]    = inputR;
 
-        // Write mono into input ring buffer
-        inputRing[ringWritePos] = mono;
+        // Read the OLA-reconstructed output for this position (written by past frames)
+        float outL = outputRingL[ringWritePos];
+        float outR = outputRingR[ringWritePos];
 
-        // Read from output ring buffer (this was written HOP_SIZE ago by OLA)
-        float outMono = outputRing[ringWritePos];
-
-        // Clear the output ring position for the next OLA accumulation
-        outputRing[ringWritePos] = 0.0f;
+        // Clear for the next OLA accumulation cycle
+        outputRingL[ringWritePos] = 0.0f;
+        outputRingR[ringWritePos] = 0.0f;
 
         // Advance write position
         ringWritePos = (ringWritePos + 1) % (FFT_SIZE * 2);
@@ -142,17 +153,7 @@ class BarkFFTCompressor {
             samplesUntilNextFFT = HOP_SIZE;
         }
 
-        // Apply output gain to both channels proportionally
-        // Use the mono output / mono input ratio to scale stereo
-        float gain = 1.0f;
-        if (std::abs(mono) > 1e-10f) {
-            gain = outMono / mono;
-        }
-
-        // Clamp gain to prevent extreme values during silence/transients
-        gain = std::max(-10.0f, std::min(10.0f, gain));
-
-        return { inputL * gain, inputR * gain };
+        return { outL, outR };
     }
 
     // ── UI accessors (read from UI thread) ───────────────────────────────
@@ -365,98 +366,119 @@ class BarkFFTCompressor {
 
     // ── FFT frame processing ─────────────────────────────────────────────
 
-    /** Process one FFT frame: analysis → compression → synthesis via OLA. */
+    /** Process one FFT frame: analysis → per-band gain computation → stereo synthesis via OLA.
+     *
+     * Signal path:
+     *   1. Analysis: forward FFT of the mono mix → compute per-band gains.
+     *   2. Synthesis L: forward FFT of L → apply same per-band gains → IFFT → OLA.
+     *   3. Synthesis R: forward FFT of R → apply same per-band gains → IFFT → OLA.
+     *
+     * Because gains are applied in the frequency domain per-band, only the
+     * frequencies within each Bark band are attenuated.  There is no single
+     * broadband scalar so a bass-drum hit compressing low bands does NOT duck
+     * mid- or high-frequency content.
+     */
     void processFFTFrame() {
-        // 1. Copy input ring into FFT buffer with Hann window
-        //    Read the last FFT_SIZE samples ending at current ringWritePos
+        // ── Step 1: Analysis ─────────────────────────────────────────────
+        // Window + FFT on the mono mix to compute per-band compression gains.
         for (int i = 0; i < FFT_SIZE; ++i) {
             int ringIdx = (ringWritePos - FFT_SIZE + i + FFT_SIZE * 2) % (FFT_SIZE * 2);
-            fftBuffer[i] = inputRing[ringIdx] * hannWindow[i];
+            fftBuffer[i] = inputRingMono[ringIdx] * hannWindow[i];
         }
-
-        // Zero-pad the second half (complex part for JUCE FFT)
-        for (int i = FFT_SIZE; i < FFT_SIZE * 2; ++i) {
+        for (int i = FFT_SIZE; i < FFT_SIZE * 2; ++i)
             fftBuffer[i] = 0.0f;
-        }
 
-        // 2. Forward FFT (in-place, interleaved real/imag)
         fft->performRealOnlyForwardTransform(fftBuffer.data());
 
-        // 3. Compute power spectrum and Bark band energies
+        // Accumulate power per Bark band
         std::array<float, NUM_BARK_BANDS> barkEnergies{};
         for (int k = 0; k < NUM_BINS; ++k) {
             float re = fftBuffer[k * 2];
             float im = fftBuffer[k * 2 + 1];
-            float power = re * re + im * im;
-
-            int band = binToBand[k];
-            barkEnergies[band] += power;
+            barkEnergies[binToBand[k]] += re * re + im * im;
         }
 
-        // 4. Compute per-band compression gain
+        // ── Step 2: Compute per-band gains ───────────────────────────────
         const auto& splAdjustments = contourTables[static_cast<int>(currentPreset)];
+
+        // Normalise raw FFT power to dBFS.
+        // JUCE's forward transform is unnormalized: for a 0-dBFS sine with a Hann
+        // window of size N the peak bin power is (N/4)^2.  Subtracting this offset
+        // maps the energy axis so that 0 dBFS → 0 dB, matching the user-visible
+        // threshold parameter range (-60..0 dB).
+        static const float kFFTNormDb =
+            20.0f * std::log10(static_cast<float>(FFT_SIZE) / 4.0f); // ≈ 54.2 dB for N=2048
 
         std::array<float, NUM_BARK_BANDS> bandGainLinear{};
         for (int i = 0; i < NUM_BARK_BANDS; ++i) {
-            // Normalize energy by number of bins (avoid bands with more bins dominating)
             float normalizedEnergy = (binsPerBand[i] > 0)
                 ? barkEnergies[i] / static_cast<float>(binsPerBand[i])
                 : 0.0f;
 
-            // Convert to dB
-            float energyDb = 10.0f * std::log10(normalizedEnergy + 1e-20f);
+            float energyDb = 10.0f * std::log10(normalizedEnergy + 1e-20f) - kFFTNormDb;
             currentBandEnergyDb[i] = energyDb;
 
-            // Deviation from equal-loudness contour
             float deviationDb = energyDb - splAdjustments[i];
 
-            // Compression: if deviation exceeds threshold, compress
             float gainReductionDb = 0.0f;
             if (deviationDb > thresholdDb) {
                 float overDb = deviationDb - thresholdDb;
-                float compressedOver = overDb / ratio;
-                gainReductionDb = -(overDb - compressedOver);
+                gainReductionDb = -(overDb - overDb / ratio);
             }
 
-            // Apply attack/release smoothing to gain reduction
-            if (gainReductionDb < smoothedGainReductionDb[i]) {
-                // Gain reduction increasing (compressor engaging) → use attack
+            if (gainReductionDb < smoothedGainReductionDb[i])
                 smoothedGainReductionDb[i] = gainReductionDb + attackCoeff
                     * (smoothedGainReductionDb[i] - gainReductionDb);
-            } else {
-                // Gain reduction decreasing (compressor releasing) → use release
+            else
                 smoothedGainReductionDb[i] = gainReductionDb + releaseCoeff
                     * (smoothedGainReductionDb[i] - gainReductionDb);
-            }
 
-            // Store for UI display
             currentBandGainReductionDb[i] = smoothedGainReductionDb[i];
-
-            // Convert smoothed gain reduction to linear
             bandGainLinear[i] = std::pow(10.0f, smoothedGainReductionDb[i] / 20.0f);
         }
 
-        // 5. Apply per-band gain to FFT bins
-        for (int k = 0; k < NUM_BINS; ++k) {
-            float gain = bandGainLinear[binToBand[k]];
-            fftBuffer[k * 2]     *= gain;
-            fftBuffer[k * 2 + 1] *= gain;
-        }
-        // Mirror the negative frequencies
-        // JUCE's performRealOnlyInverseTransform expects the full buffer
-        // The DC and Nyquist bins don't have imaginary counterparts in JUCE's format
+        // ── Steps 3 & 4: Stereo synthesis ────────────────────────────────
+        // For each channel: window + FFT -> apply same per-band gains -> IFFT -> OLA.
+        //
+        // The Hann window is applied ONLY at the analysis stage (before FFT).
+        // No synthesis window is applied. With a periodic Hann at 50% overlap:
+        //   sum_m w[n - m*H] = 1  (COLA property)
+        // so the raw OLA sum of IFFT frames already equals the input at unity gain.
+        // No scale factor and no synthesis window are needed.
+        //
+        // Applying a second window at synthesis (hann*hann) breaks this:
+        //   hann^2[n] + hann^2[n+N/2] = 0.25*(3 + cos(4*pi*n/N)) -- NOT constant --
+        // which produces amplitude modulation at ~sampleRate/HOP_SIZE Hz (~43 Hz at 44.1 kHz).
 
-        // 6. Inverse FFT
-        fft->performRealOnlyInverseTransform(fftBuffer.data());
+        auto synthesiseChannel = [&](const std::array<float, FFT_SIZE * 2>& inRing,
+                                     std::array<float, FFT_SIZE * 2>& outRing,
+                                     std::array<float, FFT_SIZE * 2>& buf) {
+            for (int i = 0; i < FFT_SIZE; ++i) {
+                int ringIdx = (ringWritePos - FFT_SIZE + i + FFT_SIZE * 2) % (FFT_SIZE * 2);
+                buf[i] = inRing[ringIdx] * hannWindow[i];
+            }
+            for (int i = FFT_SIZE; i < FFT_SIZE * 2; ++i)
+                buf[i] = 0.0f;
 
-        // 7. Overlap-add: window the IFFT output and accumulate into output ring
-        for (int i = 0; i < FFT_SIZE; ++i) {
-            int outIdx = (ringWritePos - FFT_SIZE + i + FFT_SIZE * 2) % (FFT_SIZE * 2);
-            // Apply synthesis window and scale by 1/windowSum for perfect reconstruction
-            // For 50% overlap Hann: scale factor = 2/3 per frame, but sum of two frames = 1
-            // The Hann window OLA with 50% overlap sums to 1.0, so just apply window
-            outputRing[outIdx] += fftBuffer[i] * hannWindow[i];
-        }
+            fft->performRealOnlyForwardTransform(buf.data());
+
+            for (int k = 0; k < NUM_BINS; ++k) {
+                float g = bandGainLinear[binToBand[k]];
+                buf[k * 2]     *= g;
+                buf[k * 2 + 1] *= g;
+            }
+
+            fft->performRealOnlyInverseTransform(buf.data());
+
+            // OLA: accumulate raw IFFT output -- no synthesis window, no scale factor.
+            for (int i = 0; i < FFT_SIZE; ++i) {
+                int outIdx = (ringWritePos - FFT_SIZE + i + FFT_SIZE * 2) % (FFT_SIZE * 2);
+                outRing[outIdx] += buf[i];
+            }
+        };
+
+        synthesiseChannel(inputRingL, outputRingL, fftBufferL);
+        synthesiseChannel(inputRingR, outputRingR, fftBufferR);
     }
 
     // ── FFT engine ───────────────────────────────────────────────────────
@@ -474,8 +496,8 @@ class BarkFFTCompressor {
 
     // ── Smoothing coefficients ───────────────────────────────────────────
 
-    float attackCoeff  = 0.0f;
-    float releaseCoeff = 0.0f;
+    float attackCoeff      = 0.0f;
+    float releaseCoeff     = 0.0f;
 
     // ── Pre-computed lookup tables ───────────────────────────────────────
 
@@ -497,15 +519,26 @@ class BarkFFTCompressor {
     std::array<float, NUM_BARK_BANDS> currentBandEnergyDb{};
 
     // ── Overlap-add ring buffers ─────────────────────────────────────────
-
-    std::array<float, FFT_SIZE * 2> inputRing{};
-    std::array<float, FFT_SIZE * 2> outputRing{};
+    //
+    // Mono mix is used for analysis only.  L/R have independent synthesis
+    // paths so per-band gains affect only the corresponding frequency range
+    // in each channel (no cross-band pumping).
+    std::array<float, FFT_SIZE * 2> inputRingMono{};
+    std::array<float, FFT_SIZE * 2> inputRingL{};
+    std::array<float, FFT_SIZE * 2> inputRingR{};
+    std::array<float, FFT_SIZE * 2> outputRingL{};
+    std::array<float, FFT_SIZE * 2> outputRingR{};
     int ringWritePos = 0;
     int samplesUntilNextFFT = HOP_SIZE;
 
     // ── FFT workspace ────────────────────────────────────────────────────
-
+    //
+    // fftBuffer  — analysis (mono mix)
+    // fftBufferL — synthesis channel L
+    // fftBufferR — synthesis channel R
     std::array<float, FFT_SIZE * 2> fftBuffer{};
+    std::array<float, FFT_SIZE * 2> fftBufferL{};
+    std::array<float, FFT_SIZE * 2> fftBufferR{};
 };
 
 } // namespace audio
