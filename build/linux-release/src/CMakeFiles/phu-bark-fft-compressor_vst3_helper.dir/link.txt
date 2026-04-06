@@ -1,1 +1,0 @@
-/usr/bin/c++ -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/phu-bark-fft-compressor_vst3_helper.dir/link.d "CMakeFiles/phu-bark-fft-compressor_vst3_helper.dir/__/JUCE/modules/juce_audio_plugin_client/VST3/juce_VST3ManifestHelper.cpp.o" -o phu-bark-fft-compressor_vst3_helper
