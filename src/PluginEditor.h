@@ -65,6 +65,10 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     juce::Label fftModeLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> fftModeAttachment;
 
+    juce::ComboBox smoothingTapsCombo;
+    juce::Label smoothingTapsLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> smoothingTapsAttachment;
+
     // ── Transient Shaper controls ────────────────────────────────────────
     juce::GroupComponent transientShaperGroup;
 

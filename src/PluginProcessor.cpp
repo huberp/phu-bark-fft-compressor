@@ -17,6 +17,7 @@ PhuBarkFFTCompressorAudioProcessor::PhuBarkFFTCompressorAudioProcessor()
     tsSustainParam     = apvts.getRawParameterValue(PARAM_TS_SUSTAIN);
     tsSensitivityParam = apvts.getRawParameterValue(PARAM_TS_SENSITIVITY);
     tsBypassParam      = apvts.getRawParameterValue(PARAM_TS_BYPASS);
+    smoothingTapsParam = apvts.getRawParameterValue(PARAM_SMOOTHING_TAPS);
 }
 
 PhuBarkFFTCompressorAudioProcessor::~PhuBarkFFTCompressorAudioProcessor() = default;
@@ -98,6 +99,13 @@ PhuBarkFFTCompressorAudioProcessor::createParameterLayout() {
         "Bypass Transient Shaper",
         true)); // Default: bypassed
 
+    // ── Smoothing ─────────────────────────────────────────────────────────
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{PARAM_SMOOTHING_TAPS, 1},
+        "Smoothing Tap Length",
+        juce::StringArray{"3 taps", "5 taps", "7 taps"},
+        1)); // Default: 5 taps (index 1)
+
     return {params.begin(), params.end()};
 }
 
@@ -117,6 +125,8 @@ void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int /*
     m_compressor.setReleaseMs(releaseParam->load());
     m_compressor.setContourPreset(
         static_cast<BarkFFTCompressor::ContourPreset>(static_cast<int>(contourParam->load())));
+    m_compressor.setSmoothingTapLength(
+        smoothingTapChoiceToCount(static_cast<int>(smoothingTapsParam->load())));
 
     // Report latency to DAW for compensation
     setLatencySamples(m_compressor.getLatencySamples());
@@ -170,6 +180,8 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
     m_compressor.setReleaseMs(releaseParam->load());
     m_compressor.setContourPreset(
         static_cast<BarkFFTCompressor::ContourPreset>(static_cast<int>(contourParam->load())));
+    m_compressor.setSmoothingTapLength(
+        smoothingTapChoiceToCount(static_cast<int>(smoothingTapsParam->load())));
 
     // Update transient shaper parameters
     m_transientShaper.setParameters(
