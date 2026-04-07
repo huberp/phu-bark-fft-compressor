@@ -125,15 +125,8 @@ void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int /*
     m_compressor.setReleaseMs(releaseParam->load());
     m_compressor.setContourPreset(
         static_cast<BarkFFTCompressor::ContourPreset>(static_cast<int>(contourParam->load())));
-
-    // Map choice index to actual tap count: 0→3, 1→5, 2→7
-    static const int kTapChoices[] = {3, 5, 7};
-    {
-        int idx = static_cast<int>(smoothingTapsParam->load());
-        if (idx < 0) idx = 0;
-        if (idx > 2) idx = 2;
-        m_compressor.setSmoothingTapLength(kTapChoices[idx]);
-    }
+    m_compressor.setSmoothingTapLength(
+        smoothingTapChoiceToCount(static_cast<int>(smoothingTapsParam->load())));
 
     // Report latency to DAW for compensation
     setLatencySamples(m_compressor.getLatencySamples());
@@ -187,15 +180,8 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
     m_compressor.setReleaseMs(releaseParam->load());
     m_compressor.setContourPreset(
         static_cast<BarkFFTCompressor::ContourPreset>(static_cast<int>(contourParam->load())));
-
-    // Map choice index to actual tap count: 0→3, 1→5, 2→7
-    static const int kTapChoices[] = {3, 5, 7};
-    {
-        int idx = static_cast<int>(smoothingTapsParam->load());
-        if (idx < 0) idx = 0;
-        if (idx > 2) idx = 2;
-        m_compressor.setSmoothingTapLength(kTapChoices[idx]);
-    }
+    m_compressor.setSmoothingTapLength(
+        smoothingTapChoiceToCount(static_cast<int>(smoothingTapsParam->load())));
 
     // Update transient shaper parameters
     m_transientShaper.setParameters(

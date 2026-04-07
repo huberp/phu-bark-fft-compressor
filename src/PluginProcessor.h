@@ -65,6 +65,14 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
   private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
+    /** Maps a smoothing-taps choice index (0, 1, 2) to an actual tap count (3, 5, 7). */
+    static int smoothingTapChoiceToCount(int choiceIndex) noexcept {
+        static const int kTapChoices[] = {3, 5, 7};
+        if (choiceIndex < 0) choiceIndex = 0;
+        if (choiceIndex > 2) choiceIndex = 2;
+        return kTapChoices[choiceIndex];
+    }
+
     juce::AudioProcessorValueTreeState apvts;
 
     // Cached atomic parameter pointers for audio thread

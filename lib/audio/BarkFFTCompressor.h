@@ -503,7 +503,9 @@ class BarkFFTCompressor {
         // Moving-average smoothing with edge-repeat boundary handling.
         if (smoothingTapLength > 1) {
             const int half = smoothingTapLength / 2;
-            const float invTaps = 1.0f / static_cast<float>(smoothingTapLength);
+            // Use the actual number of samples in the window (2*half+1) as the
+            // divisor so the algorithm is correct even when smoothingTapLength is even.
+            const float invActualTaps = 1.0f / static_cast<float>(2 * half + 1);
             for (int k = 0; k < currentNumBins; ++k) {
                 float sum = 0.0f;
                 for (int t = -half; t <= half; ++t) {
@@ -512,7 +514,7 @@ class BarkFFTCompressor {
                     if (idx >= currentNumBins) idx = currentNumBins - 1;
                     sum += binGains[idx];
                 }
-                binGainsSmoothed[k] = sum * invTaps;
+                binGainsSmoothed[k] = sum * invActualTaps;
             }
             std::swap(binGains, binGainsSmoothed);
         }
@@ -593,7 +595,7 @@ class BarkFFTCompressor {
 
     std::vector<float> hannWindow;    // [currentFFTSize]
     std::vector<int>   binToBand;     // [currentNumBins]
-    std::vector<float> binGains;          // [currentNumBins] per-bin gain (smoothed)
+    std::vector<float> binGains;          // [currentNumBins] active per-bin gain buffer (smoothed after processFFTFrame)
     std::vector<float> binGainsSmoothed;  // [currentNumBins] smoothing scratch buffer
     std::array<int, NUM_BARK_BANDS> binsPerBand{};
     std::array<float, NUM_BARK_BANDS> barkBandCenterFreqs{};
