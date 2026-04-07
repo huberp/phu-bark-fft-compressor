@@ -227,7 +227,7 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
 
     // TS Bypass toggle
     tsBypassToggle.setButtonText("Bypass Transient Shaper");
-    tsBypassToggle.setTooltip("When enabled, the transient shaper is fully transparent.");
+    tsBypassToggle.setTooltip("When enabled, bypasses the transient shaper (passes audio through unchanged).");
     addAndMakeVisible(tsBypassToggle);
     tsBypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_TS_BYPASS,

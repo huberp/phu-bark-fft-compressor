@@ -77,9 +77,16 @@ class BarkFFTCompressor {
         // Compute runtime FFT parameters from the current mode and sample rate.
         currentFFTSize  = computeFFTSize(currentFFTMode, currentSampleRate);
         currentFFTOrder = 0;
+        // Count trailing shifts to find log2(currentFFTSize), e.g. 2048→11, 4096→12.
         { int sz = currentFFTSize; while (sz > 1) { ++currentFFTOrder; sz >>= 1; } }
         currentNumBins  = currentFFTSize / 2;
         currentHopSize  = currentFFTSize / 2; // 50% overlap
+
+        // Normalise raw FFT power to dBFS (depends on FFT size so must be updated here).
+        // JUCE's forward transform is unnormalized: for a 0-dBFS sine with a Hann window of
+        // size N the peak bin power is (N/4)^2. Subtracting this offset maps the energy axis
+        // so that 0 dBFS → 0 dB, matching the user-visible threshold range (-60..0 dB).
+        kFFTNormDb = 20.0f * std::log10(static_cast<float>(currentFFTSize) / 4.0f);
 
         // (Re-)create the FFT engine if the order changed.
         if (!fft || fft->getSize() != currentFFTSize)
@@ -450,14 +457,6 @@ class BarkFFTCompressor {
         // ── Step 2: Compute per-band gains ───────────────────────────────
         const auto& splAdjustments = contourTables[static_cast<int>(currentPreset)];
 
-        // Normalise raw FFT power to dBFS.
-        // JUCE's forward transform is unnormalized: for a 0-dBFS sine with a Hann
-        // window of size N the peak bin power is (N/4)^2.  Subtracting this offset
-        // maps the energy axis so that 0 dBFS → 0 dB, matching the user-visible
-        // threshold parameter range (-60..0 dB).
-        const float kFFTNormDb =
-            20.0f * std::log10(static_cast<float>(currentFFTSize) / 4.0f);
-
         std::array<float, NUM_BARK_BANDS> bandGainLinear{};
         for (int i = 0; i < NUM_BARK_BANDS; ++i) {
             float normalizedEnergy = (binsPerBand[i] > 0)
@@ -541,6 +540,7 @@ class BarkFFTCompressor {
     int currentFFTSize     = 2048;
     int currentNumBins     = 1024;
     int currentHopSize     = 1024;
+    float kFFTNormDb       = 54.2f; // 20*log10(2048/4), updated in prepare()
 
     // ── Parameters ───────────────────────────────────────────────────────
 

@@ -152,7 +152,8 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
     // ── FFT mode change detection ─────────────────────────────────────────
     // If the user switched the FFT mode, re-initialise the compressor.
     // This reallocates buffers (not real-time-safe) but only fires once per
-    // mode change, so the brief glitch is acceptable.
+    // mode change — the brief audio glitch (silence for one block) is acceptable
+    // for this kind of structural reconfiguration.
     const int fftModeIndex = static_cast<int>(fftModeParam->load());
     if (fftModeIndex != lastFFTModeIndex) {
         lastFFTModeIndex = fftModeIndex;

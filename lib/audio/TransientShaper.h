@@ -112,7 +112,7 @@ class TransientShaper {
     float attackGainDb       = 0.0f;
     float sustainGainDb      = 0.0f;
     float detectionThreshold = 5.5f; // corresponds to sensitivity=50%
-    bool  isBypassed         = false;
+    bool  isBypassed         = true;  // bypassed by default (matches APVTS default)
 
     // Envelope follower coefficients (computed in prepare())
     float fastAttackCoeff    = 0.0f;
