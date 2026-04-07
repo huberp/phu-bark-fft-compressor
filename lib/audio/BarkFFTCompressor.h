@@ -466,11 +466,12 @@ class BarkFFTCompressor {
             float energyDb = 10.0f * std::log10(normalizedEnergy + 1e-20f) - kFFTNormDb;
             currentBandEnergyDb[i] = energyDb;
 
-            float deviationDb = energyDb - splAdjustments[i];
+            // Apply contour offset: threshold is the contour value shifted by the offset
+            float adjustedContourDb = splAdjustments[i] + thresholdDb;
 
             float gainReductionDb = 0.0f;
-            if (deviationDb > thresholdDb) {
-                float overDb = deviationDb - thresholdDb;
+            if (energyDb > adjustedContourDb) {
+                float overDb = energyDb - adjustedContourDb;
                 gainReductionDb = -(overDb - overDb / ratio);
             }
 

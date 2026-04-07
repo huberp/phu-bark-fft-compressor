@@ -84,13 +84,17 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
     addAndMakeVisible(compressorGroup);
 
     // Threshold slider
-    thresholdLabel.setText("Threshold", juce::dontSendNotification);
+    thresholdLabel.setText("Contour Offset", juce::dontSendNotification);
     thresholdLabel.setJustificationType(juce::Justification::centredLeft);
+    thresholdLabel.setTooltip("Adjusts the equal-loudness contour threshold up or down in dB. "
+                              "Positive values increase the threshold, negative values decrease it.");
     addAndMakeVisible(thresholdLabel);
 
     thresholdSlider.setSliderStyle(juce::Slider::LinearHorizontal);
     thresholdSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
     thresholdSlider.setTextValueSuffix(" dB");
+    thresholdSlider.setTooltip("Adjusts the equal-loudness contour threshold up or down in dB. "
+                               "Positive values increase the threshold, negative values decrease it.");
     addAndMakeVisible(thresholdSlider);
     thresholdAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_THRESHOLD,

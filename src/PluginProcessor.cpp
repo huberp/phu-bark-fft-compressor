@@ -27,9 +27,9 @@ PhuBarkFFTCompressorAudioProcessor::createParameterLayout() {
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{PARAM_THRESHOLD, 1},
-        "Threshold",
-        juce::NormalisableRange<float>(-60.0f, 0.0f, 0.1f),
-        -20.0f,
+        "Contour Offset",
+        juce::NormalisableRange<float>(-20.0f, 20.0f, 0.1f),
+        0.0f,
         juce::AudioParameterFloatAttributes().withLabel("dB")));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
