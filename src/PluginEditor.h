@@ -38,7 +38,7 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     };
     GainReductionPanel gainReductionPanel;
 
-    // Parameter controls
+    // ── Compressor controls ──────────────────────────────────────────────
     juce::GroupComponent compressorGroup;
 
     juce::Slider thresholdSlider;
@@ -61,7 +61,29 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     juce::Label contourLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> contourAttachment;
 
-    // FFT display controls
+    juce::ComboBox fftModeCombo;
+    juce::Label fftModeLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> fftModeAttachment;
+
+    // ── Transient Shaper controls ────────────────────────────────────────
+    juce::GroupComponent transientShaperGroup;
+
+    juce::Slider tsAttackSlider;
+    juce::Label tsAttackLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tsAttackAttachment;
+
+    juce::Slider tsSustainSlider;
+    juce::Label tsSustainLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tsSustainAttachment;
+
+    juce::Slider tsSensitivitySlider;
+    juce::Label tsSensitivityLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tsSensitivityAttachment;
+
+    juce::ToggleButton tsBypassToggle;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> tsBypassAttachment;
+
+    // ── FFT display controls ─────────────────────────────────────────────
     juce::GroupComponent displayGroup;
     juce::ToggleButton inputFFTToggle;
     juce::ToggleButton outputFFTToggle;

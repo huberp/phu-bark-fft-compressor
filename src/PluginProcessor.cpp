@@ -7,11 +7,16 @@ PhuBarkFFTCompressorAudioProcessor::PhuBarkFFTCompressorAudioProcessor()
                          .withOutput("Output", juce::AudioChannelSet::stereo(), true)),
       apvts(*this, nullptr, "Parameters", createParameterLayout()) {
     // Cache raw parameter pointers for lock-free audio-thread access
-    thresholdParam = apvts.getRawParameterValue(PARAM_THRESHOLD);
-    ratioParam     = apvts.getRawParameterValue(PARAM_RATIO);
-    attackParam    = apvts.getRawParameterValue(PARAM_ATTACK);
-    releaseParam   = apvts.getRawParameterValue(PARAM_RELEASE);
-    contourParam   = apvts.getRawParameterValue(PARAM_CONTOUR);
+    thresholdParam     = apvts.getRawParameterValue(PARAM_THRESHOLD);
+    ratioParam         = apvts.getRawParameterValue(PARAM_RATIO);
+    attackParam        = apvts.getRawParameterValue(PARAM_ATTACK);
+    releaseParam       = apvts.getRawParameterValue(PARAM_RELEASE);
+    contourParam       = apvts.getRawParameterValue(PARAM_CONTOUR);
+    fftModeParam       = apvts.getRawParameterValue(PARAM_FFT_MODE);
+    tsAttackParam      = apvts.getRawParameterValue(PARAM_TS_ATTACK);
+    tsSustainParam     = apvts.getRawParameterValue(PARAM_TS_SUSTAIN);
+    tsSensitivityParam = apvts.getRawParameterValue(PARAM_TS_SENSITIVITY);
+    tsBypassParam      = apvts.getRawParameterValue(PARAM_TS_BYPASS);
 }
 
 PhuBarkFFTCompressorAudioProcessor::~PhuBarkFFTCompressorAudioProcessor() = default;
@@ -59,10 +64,50 @@ PhuBarkFFTCompressorAudioProcessor::createParameterLayout() {
             BarkFFTCompressor::getContourPresetName(BarkFFTCompressor::ContourPreset::Flat)},
         1)); // Default: 40 phon
 
+    // ── FFT Mode ─────────────────────────────────────────────────────────
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{PARAM_FFT_MODE, 1},
+        "FFT Mode",
+        juce::StringArray{"Precision", "Transient"},
+        0)); // Default: Precision
+
+    // ── Transient Shaper ─────────────────────────────────────────────────
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{PARAM_TS_ATTACK, 1},
+        "Attack",
+        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f),
+        0.0f,
+        juce::AudioParameterFloatAttributes().withLabel("dB")));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{PARAM_TS_SUSTAIN, 1},
+        "Sustain",
+        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f),
+        0.0f,
+        juce::AudioParameterFloatAttributes().withLabel("dB")));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{PARAM_TS_SENSITIVITY, 1},
+        "Sensitivity",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
+        50.0f,
+        juce::AudioParameterFloatAttributes().withLabel("%")));
+
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID{PARAM_TS_BYPASS, 1},
+        "Bypass Transient Shaper",
+        true)); // Default: bypassed
+
     return {params.begin(), params.end()};
 }
 
 void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
+    // Apply FFT mode before prepare so buffers are sized correctly
+    const int fftModeIndex = static_cast<int>(fftModeParam->load());
+    lastFFTModeIndex = fftModeIndex;
+    m_compressor.setFFTMode(fftModeIndex == 0 ? BarkFFTCompressor::FFTMode::Precision
+                                              : BarkFFTCompressor::FFTMode::Transient);
+
     m_compressor.prepare(sampleRate);
 
     // Apply current parameter values
@@ -75,6 +120,14 @@ void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int /*
 
     // Report latency to DAW for compensation
     setLatencySamples(m_compressor.getLatencySamples());
+
+    // Prepare transient shaper
+    m_transientShaper.prepare(sampleRate);
+    m_transientShaper.setParameters(
+        tsAttackParam->load(),
+        tsSustainParam->load(),
+        tsSensitivityParam->load(),
+        tsBypassParam->load() >= 0.5f);
 
     m_inputFifo.reset();
     m_outputFifo.reset();
@@ -96,6 +149,20 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
     for (int i = totalNumInputChannels; i < totalNumOutputChannels; ++i)
         buffer.clear(i, 0, numSamples);
 
+    // ── FFT mode change detection ─────────────────────────────────────────
+    // If the user switched the FFT mode, re-initialise the compressor.
+    // This reallocates buffers (not real-time-safe) but only fires once per
+    // mode change — the brief audio glitch (silence for one block) is acceptable
+    // for this kind of structural reconfiguration.
+    const int fftModeIndex = static_cast<int>(fftModeParam->load());
+    if (fftModeIndex != lastFFTModeIndex) {
+        lastFFTModeIndex = fftModeIndex;
+        m_compressor.setFFTMode(fftModeIndex == 0 ? BarkFFTCompressor::FFTMode::Precision
+                                                  : BarkFFTCompressor::FFTMode::Transient);
+        m_compressor.prepare(getSampleRate());
+        setLatencySamples(m_compressor.getLatencySamples());
+    }
+
     // Update compressor parameters from APVTS (lock-free atomic reads)
     m_compressor.setThresholdDb(thresholdParam->load());
     m_compressor.setRatio(ratioParam->load());
@@ -103,6 +170,13 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
     m_compressor.setReleaseMs(releaseParam->load());
     m_compressor.setContourPreset(
         static_cast<BarkFFTCompressor::ContourPreset>(static_cast<int>(contourParam->load())));
+
+    // Update transient shaper parameters
+    m_transientShaper.setParameters(
+        tsAttackParam->load(),
+        tsSustainParam->load(),
+        tsSensitivityParam->load(),
+        tsBypassParam->load() >= 0.5f);
 
     // Push input samples to FIFO for UI display
     const float* inputPtrs[2] = {buffer.getReadPointer(0),
@@ -119,6 +193,10 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         float inR = rightChannel ? rightChannel[i] : inL;
 
         auto result = m_compressor.processSample(inL, inR);
+
+        // Apply transient shaper as a post-processing stage
+        result.left  = m_transientShaper.processSample(result.left);
+        result.right = m_transientShaper.processSample(result.right);
 
         leftChannel[i] = result.left;
         if (rightChannel)
