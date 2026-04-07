@@ -24,11 +24,11 @@ namespace audio {
  */
 class BarkFFTCompressor {
   public:
-    static constexpr int FFT_ORDER = 11;
-    static constexpr int FFT_SIZE = 1 << FFT_ORDER; // 2048
-    static constexpr int NUM_BINS = FFT_SIZE / 2;    // 1024 usable bins
     static constexpr int NUM_BARK_BANDS = 24;
-    static constexpr int HOP_SIZE = FFT_SIZE / 2;    // 50% overlap
+
+    // FFT mode: Precision uses a larger FFT (better frequency resolution);
+    // Transient uses a smaller FFT (better transient response).
+    enum class FFTMode { Precision, Transient };
 
     // Equal-loudness contour presets
     enum class ContourPreset {
@@ -41,24 +41,71 @@ class BarkFFTCompressor {
     };
 
     BarkFFTCompressor() {
-        fft = std::make_unique<juce::dsp::FFT>(FFT_ORDER);
+        // Allocate FFT engine for the default mode (Precision, 44.1 kHz → order 11)
+        fft = std::make_unique<juce::dsp::FFT>(11);
     }
+
+    // ── FFT mode ─────────────────────────────────────────────────────────
+
+    /** Set the FFT mode. Call before or after prepare(); effective on next prepare(). */
+    void setFFTMode(FFTMode mode) { currentFFTMode = mode; }
+    FFTMode getFFTMode() const { return currentFFTMode; }
+
+    /**
+     * Compute the FFT size for a given mode and sample rate.
+     *   Precision: 2048 (≤48 kHz), 4096 (>48 kHz)
+     *   Transient:  1024 (≤48 kHz), 2048 (>48 kHz)
+     */
+    static int computeFFTSize(FFTMode mode, float sampleRate) {
+        if (mode == FFTMode::Precision)
+            return (sampleRate <= 48000.0f) ? 2048 : 4096;
+        else
+            return (sampleRate <= 48000.0f) ? 1024 : 2048;
+    }
+
+    /** Current FFT size (valid after prepare()). */
+    int getCurrentFFTSize() const { return currentFFTSize; }
 
     /**
      * Prepare the compressor for playback.
      * Must be called from prepareToPlay with the current sample rate.
+     * Re-initialises all buffers whenever called (e.g. after setFFTMode).
      */
     void prepare(double sampleRate) {
         currentSampleRate = static_cast<float>(sampleRate);
+
+        // Compute runtime FFT parameters from the current mode and sample rate.
+        currentFFTSize  = computeFFTSize(currentFFTMode, currentSampleRate);
+        currentFFTOrder = 0;
+        { int sz = currentFFTSize; while (sz > 1) { ++currentFFTOrder; sz >>= 1; } }
+        currentNumBins  = currentFFTSize / 2;
+        currentHopSize  = currentFFTSize / 2; // 50% overlap
+
+        // (Re-)create the FFT engine if the order changed.
+        if (!fft || fft->getSize() != currentFFTSize)
+            fft = std::make_unique<juce::dsp::FFT>(currentFFTOrder);
+
+        // Resize all dynamic buffers.
+        const int ringSize = currentFFTSize * 2;
+        hannWindow    .assign(currentFFTSize, 0.0f);
+        binToBand     .assign(currentNumBins, 0);
+        inputRingMono .assign(ringSize, 0.0f);
+        inputRingL    .assign(ringSize, 0.0f);
+        inputRingR    .assign(ringSize, 0.0f);
+        outputRingL   .assign(ringSize, 0.0f);
+        outputRingR   .assign(ringSize, 0.0f);
+        fftBuffer     .assign(ringSize, 0.0f);
+        fftBufferL    .assign(ringSize, 0.0f);
+        fftBufferR    .assign(ringSize, 0.0f);
 
         // Pre-compute periodic Hann window (denominator = FFT_SIZE, not FFT_SIZE-1).
         // The periodic form satisfies the COLA condition at 50% overlap:
         //   w[n] + w[n + N/2] = 1  for all n
         // which is required for perfect reconstruction when the window is applied
         // only at the analysis stage (no synthesis window).
-        for (int i = 0; i < FFT_SIZE; ++i) {
+        for (int i = 0; i < currentFFTSize; ++i) {
             hannWindow[i] = 0.5f * (1.0f - std::cos(2.0f * kPi * static_cast<float>(i)
-                                                     / static_cast<float>(FFT_SIZE)));
+                                                     / static_cast<float>(currentFFTSize)));
         }
 
         // Pre-compute bin-to-Bark mapping
@@ -84,7 +131,7 @@ class BarkFFTCompressor {
         std::fill(outputRingL.begin(),   outputRingL.end(),   0.0f);
         std::fill(outputRingR.begin(),   outputRingR.end(),   0.0f);
         ringWritePos = 0;
-        samplesUntilNextFFT = HOP_SIZE;
+        samplesUntilNextFFT = currentHopSize;
 
         for (int i = 0; i < NUM_BARK_BANDS; ++i) {
             smoothedGainReductionDb[i] = 0.0f;
@@ -131,6 +178,7 @@ class BarkFFTCompressor {
         // The mono mix is used for analysis (gain computation) only; the individual
         // L/R rings are used for synthesis so per-band gains affect ONLY their own
         // frequency band — no cross-band pumping.
+        const int ringSize = currentFFTSize * 2;
         inputRingMono[ringWritePos] = (inputL + inputR) * 0.5f;
         inputRingL[ringWritePos]    = inputL;
         inputRingR[ringWritePos]    = inputR;
@@ -144,13 +192,13 @@ class BarkFFTCompressor {
         outputRingR[ringWritePos] = 0.0f;
 
         // Advance write position
-        ringWritePos = (ringWritePos + 1) % (FFT_SIZE * 2);
+        ringWritePos = (ringWritePos + 1) % ringSize;
 
         // Count down to next FFT hop
         --samplesUntilNextFFT;
         if (samplesUntilNextFFT <= 0) {
             processFFTFrame();
-            samplesUntilNextFFT = HOP_SIZE;
+            samplesUntilNextFFT = currentHopSize;
         }
 
         return { outL, outR };
@@ -202,8 +250,8 @@ class BarkFFTCompressor {
         return 0.0f;
     }
 
-    /** Get latency in samples. */
-    int getLatencySamples() const { return FFT_SIZE; }
+    /** Get latency in samples (equals the current FFT size). */
+    int getLatencySamples() const { return currentFFTSize; }
 
     /** Get the current contour preset. */
     ContourPreset getContourPreset() const { return currentPreset; }
@@ -263,8 +311,8 @@ class BarkFFTCompressor {
         }
 
         // Assign each FFT bin to a Bark band
-        for (int k = 0; k < NUM_BINS; ++k) {
-            float binFreq = (static_cast<float>(k) * currentSampleRate) / static_cast<float>(FFT_SIZE);
+        for (int k = 0; k < currentNumBins; ++k) {
+            float binFreq = (static_cast<float>(k) * currentSampleRate) / static_cast<float>(currentFFTSize);
             float bark = freqToBark(binFreq);
 
             // Find the band this bin belongs to
@@ -279,7 +327,7 @@ class BarkFFTCompressor {
         for (int i = 0; i < NUM_BARK_BANDS; ++i)
             binsPerBand[i] = 0;
 
-        for (int k = 0; k < NUM_BINS; ++k) {
+        for (int k = 0; k < currentNumBins; ++k) {
             binsPerBand[binToBand[k]]++;
         }
 
@@ -347,8 +395,8 @@ class BarkFFTCompressor {
     void updateCoefficients() {
         if (currentSampleRate <= 0.0f) return;
 
-        // Coefficients computed per-hop (HOP_SIZE samples per frame)
-        float hopsPerSecond = currentSampleRate / static_cast<float>(HOP_SIZE);
+        // Coefficients computed per-hop (currentHopSize samples per frame)
+        float hopsPerSecond = currentSampleRate / static_cast<float>(currentHopSize);
         if (hopsPerSecond <= 0.0f) return;
 
         float attackTimeSec = attackMs * 0.001f;
@@ -381,18 +429,19 @@ class BarkFFTCompressor {
     void processFFTFrame() {
         // ── Step 1: Analysis ─────────────────────────────────────────────
         // Window + FFT on the mono mix to compute per-band compression gains.
-        for (int i = 0; i < FFT_SIZE; ++i) {
-            int ringIdx = (ringWritePos - FFT_SIZE + i + FFT_SIZE * 2) % (FFT_SIZE * 2);
+        const int ringSize = currentFFTSize * 2;
+        for (int i = 0; i < currentFFTSize; ++i) {
+            int ringIdx = (ringWritePos - currentFFTSize + i + ringSize) % ringSize;
             fftBuffer[i] = inputRingMono[ringIdx] * hannWindow[i];
         }
-        for (int i = FFT_SIZE; i < FFT_SIZE * 2; ++i)
+        for (int i = currentFFTSize; i < ringSize; ++i)
             fftBuffer[i] = 0.0f;
 
         fft->performRealOnlyForwardTransform(fftBuffer.data());
 
         // Accumulate power per Bark band
         std::array<float, NUM_BARK_BANDS> barkEnergies{};
-        for (int k = 0; k < NUM_BINS; ++k) {
+        for (int k = 0; k < currentNumBins; ++k) {
             float re = fftBuffer[k * 2];
             float im = fftBuffer[k * 2 + 1];
             barkEnergies[binToBand[k]] += re * re + im * im;
@@ -406,8 +455,8 @@ class BarkFFTCompressor {
         // window of size N the peak bin power is (N/4)^2.  Subtracting this offset
         // maps the energy axis so that 0 dBFS → 0 dB, matching the user-visible
         // threshold parameter range (-60..0 dB).
-        static const float kFFTNormDb =
-            20.0f * std::log10(static_cast<float>(FFT_SIZE) / 4.0f); // ≈ 54.2 dB for N=2048
+        const float kFFTNormDb =
+            20.0f * std::log10(static_cast<float>(currentFFTSize) / 4.0f);
 
         std::array<float, NUM_BARK_BANDS> bandGainLinear{};
         for (int i = 0; i < NUM_BARK_BANDS; ++i) {
@@ -450,19 +499,19 @@ class BarkFFTCompressor {
         //   hann^2[n] + hann^2[n+N/2] = 0.25*(3 + cos(4*pi*n/N)) -- NOT constant --
         // which produces amplitude modulation at ~sampleRate/HOP_SIZE Hz (~43 Hz at 44.1 kHz).
 
-        auto synthesiseChannel = [&](const std::array<float, FFT_SIZE * 2>& inRing,
-                                     std::array<float, FFT_SIZE * 2>& outRing,
-                                     std::array<float, FFT_SIZE * 2>& buf) {
-            for (int i = 0; i < FFT_SIZE; ++i) {
-                int ringIdx = (ringWritePos - FFT_SIZE + i + FFT_SIZE * 2) % (FFT_SIZE * 2);
+        auto synthesiseChannel = [&](const std::vector<float>& inRing,
+                                     std::vector<float>& outRing,
+                                     std::vector<float>& buf) {
+            for (int i = 0; i < currentFFTSize; ++i) {
+                int ringIdx = (ringWritePos - currentFFTSize + i + ringSize) % ringSize;
                 buf[i] = inRing[ringIdx] * hannWindow[i];
             }
-            for (int i = FFT_SIZE; i < FFT_SIZE * 2; ++i)
+            for (int i = currentFFTSize; i < ringSize; ++i)
                 buf[i] = 0.0f;
 
             fft->performRealOnlyForwardTransform(buf.data());
 
-            for (int k = 0; k < NUM_BINS; ++k) {
+            for (int k = 0; k < currentNumBins; ++k) {
                 float g = bandGainLinear[binToBand[k]];
                 buf[k * 2]     *= g;
                 buf[k * 2 + 1] *= g;
@@ -471,8 +520,8 @@ class BarkFFTCompressor {
             fft->performRealOnlyInverseTransform(buf.data());
 
             // OLA: accumulate raw IFFT output -- no synthesis window, no scale factor.
-            for (int i = 0; i < FFT_SIZE; ++i) {
-                int outIdx = (ringWritePos - FFT_SIZE + i + FFT_SIZE * 2) % (FFT_SIZE * 2);
+            for (int i = 0; i < currentFFTSize; ++i) {
+                int outIdx = (ringWritePos - currentFFTSize + i + ringSize) % ringSize;
                 outRing[outIdx] += buf[i];
             }
         };
@@ -484,6 +533,14 @@ class BarkFFTCompressor {
     // ── FFT engine ───────────────────────────────────────────────────────
 
     std::unique_ptr<juce::dsp::FFT> fft;
+
+    // ── Runtime FFT parameters (set in prepare()) ────────────────────────
+
+    FFTMode currentFFTMode = FFTMode::Precision;
+    int currentFFTOrder    = 11;
+    int currentFFTSize     = 2048;
+    int currentNumBins     = 1024;
+    int currentHopSize     = 1024;
 
     // ── Parameters ───────────────────────────────────────────────────────
 
@@ -499,10 +556,10 @@ class BarkFFTCompressor {
     float attackCoeff      = 0.0f;
     float releaseCoeff     = 0.0f;
 
-    // ── Pre-computed lookup tables ───────────────────────────────────────
+    // ── Pre-computed lookup tables (size depends on FFT mode) ────────────
 
-    std::array<float, FFT_SIZE> hannWindow{};
-    std::array<int, NUM_BINS> binToBand{};
+    std::vector<float> hannWindow;    // [currentFFTSize]
+    std::vector<int>   binToBand;     // [currentNumBins]
     std::array<int, NUM_BARK_BANDS> binsPerBand{};
     std::array<float, NUM_BARK_BANDS> barkBandCenterFreqs{};
     std::array<float, NUM_BARK_BANDS> barkBandLowFreqs{};
@@ -518,27 +575,27 @@ class BarkFFTCompressor {
     std::array<float, NUM_BARK_BANDS> currentBandGainReductionDb{};
     std::array<float, NUM_BARK_BANDS> currentBandEnergyDb{};
 
-    // ── Overlap-add ring buffers ─────────────────────────────────────────
+    // ── Overlap-add ring buffers (size = currentFFTSize * 2) ─────────────
     //
     // Mono mix is used for analysis only.  L/R have independent synthesis
     // paths so per-band gains affect only the corresponding frequency range
     // in each channel (no cross-band pumping).
-    std::array<float, FFT_SIZE * 2> inputRingMono{};
-    std::array<float, FFT_SIZE * 2> inputRingL{};
-    std::array<float, FFT_SIZE * 2> inputRingR{};
-    std::array<float, FFT_SIZE * 2> outputRingL{};
-    std::array<float, FFT_SIZE * 2> outputRingR{};
+    std::vector<float> inputRingMono;
+    std::vector<float> inputRingL;
+    std::vector<float> inputRingR;
+    std::vector<float> outputRingL;
+    std::vector<float> outputRingR;
     int ringWritePos = 0;
-    int samplesUntilNextFFT = HOP_SIZE;
+    int samplesUntilNextFFT = 1024; // initialised to currentHopSize in prepare()
 
-    // ── FFT workspace ────────────────────────────────────────────────────
+    // ── FFT workspace (size = currentFFTSize * 2) ────────────────────────
     //
     // fftBuffer  — analysis (mono mix)
     // fftBufferL — synthesis channel L
     // fftBufferR — synthesis channel R
-    std::array<float, FFT_SIZE * 2> fftBuffer{};
-    std::array<float, FFT_SIZE * 2> fftBufferL{};
-    std::array<float, FFT_SIZE * 2> fftBufferR{};
+    std::vector<float> fftBuffer;
+    std::vector<float> fftBufferL;
+    std::vector<float> fftBufferR;
 };
 
 } // namespace audio

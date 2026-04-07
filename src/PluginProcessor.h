@@ -2,11 +2,13 @@
 
 #include "../lib/audio/AudioSampleFifo.h"
 #include "../lib/audio/BarkFFTCompressor.h"
+#include "../lib/audio/TransientShaper.h"
 #include <atomic>
 #include <juce_audio_processors/juce_audio_processors.h>
 
 using phu::audio::AudioSampleFifo;
 using phu::audio::BarkFFTCompressor;
+using phu::audio::TransientShaper;
 
 class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
   public:
@@ -48,11 +50,16 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     const BarkFFTCompressor& getCompressor() const { return m_compressor; }
 
     // Parameter IDs
-    static constexpr const char* PARAM_THRESHOLD = "threshold";
-    static constexpr const char* PARAM_RATIO     = "ratio";
-    static constexpr const char* PARAM_ATTACK    = "attack_ms";
-    static constexpr const char* PARAM_RELEASE   = "release_ms";
-    static constexpr const char* PARAM_CONTOUR   = "contour_preset";
+    static constexpr const char* PARAM_THRESHOLD   = "threshold";
+    static constexpr const char* PARAM_RATIO        = "ratio";
+    static constexpr const char* PARAM_ATTACK       = "attack_ms";
+    static constexpr const char* PARAM_RELEASE      = "release_ms";
+    static constexpr const char* PARAM_CONTOUR      = "contour_preset";
+    static constexpr const char* PARAM_FFT_MODE     = "fft_mode";
+    static constexpr const char* PARAM_TS_ATTACK    = "ts_attack_db";
+    static constexpr const char* PARAM_TS_SUSTAIN   = "ts_sustain_db";
+    static constexpr const char* PARAM_TS_SENSITIVITY = "ts_sensitivity";
+    static constexpr const char* PARAM_TS_BYPASS    = "ts_bypass";
 
   private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -60,14 +67,23 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     juce::AudioProcessorValueTreeState apvts;
 
     // Cached atomic parameter pointers for audio thread
-    std::atomic<float>* thresholdParam = nullptr;
-    std::atomic<float>* ratioParam     = nullptr;
-    std::atomic<float>* attackParam    = nullptr;
-    std::atomic<float>* releaseParam   = nullptr;
-    std::atomic<float>* contourParam   = nullptr;
+    std::atomic<float>* thresholdParam    = nullptr;
+    std::atomic<float>* ratioParam        = nullptr;
+    std::atomic<float>* attackParam       = nullptr;
+    std::atomic<float>* releaseParam      = nullptr;
+    std::atomic<float>* contourParam      = nullptr;
+    std::atomic<float>* fftModeParam      = nullptr;
+    std::atomic<float>* tsAttackParam     = nullptr;
+    std::atomic<float>* tsSustainParam    = nullptr;
+    std::atomic<float>* tsSensitivityParam = nullptr;
+    std::atomic<float>* tsBypassParam     = nullptr;
+
+    // Tracks the last applied FFT mode to detect changes in processBlock
+    int lastFFTModeIndex = 0;
 
     // Core DSP
     BarkFFTCompressor m_compressor;
+    TransientShaper   m_transientShaper;
 
     // Lock-free FIFOs for UI display
     AudioSampleFifo<2> m_inputFifo;

@@ -158,6 +158,81 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_CONTOUR,
         contourCombo);
 
+    // FFT Mode combo box
+    fftModeLabel.setText("FFT Mode", juce::dontSendNotification);
+    fftModeLabel.setJustificationType(juce::Justification::centredLeft);
+    fftModeLabel.setTooltip("Select between Precision (better frequency resolution) or "
+                            "Transient (better transient response) modes.");
+    addAndMakeVisible(fftModeLabel);
+
+    fftModeCombo.addItem("Precision", 1);
+    fftModeCombo.addItem("Transient", 2);
+    fftModeCombo.setTooltip("Select between Precision (better frequency resolution) or "
+                            "Transient (better transient response) modes.");
+    addAndMakeVisible(fftModeCombo);
+    fftModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_FFT_MODE,
+        fftModeCombo);
+
+    // ── Transient Shaper group ──────────────────────────────────────────
+
+    transientShaperGroup.setText("Transient Shaper");
+    transientShaperGroup.setTextLabelPosition(juce::Justification::centredLeft);
+    addAndMakeVisible(transientShaperGroup);
+
+    // TS Attack slider
+    tsAttackLabel.setText("Attack", juce::dontSendNotification);
+    tsAttackLabel.setJustificationType(juce::Justification::centredLeft);
+    tsAttackLabel.setTooltip("Boost or attenuate the attack portion of detected transients.");
+    addAndMakeVisible(tsAttackLabel);
+
+    tsAttackSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    tsAttackSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    tsAttackSlider.setTextValueSuffix(" dB");
+    tsAttackSlider.setTooltip("Boost or attenuate the attack portion of detected transients.");
+    addAndMakeVisible(tsAttackSlider);
+    tsAttackAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_TS_ATTACK,
+        tsAttackSlider);
+
+    // TS Sustain slider
+    tsSustainLabel.setText("Sustain", juce::dontSendNotification);
+    tsSustainLabel.setJustificationType(juce::Justification::centredLeft);
+    tsSustainLabel.setTooltip("Boost or attenuate the sustained portion of the signal.");
+    addAndMakeVisible(tsSustainLabel);
+
+    tsSustainSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    tsSustainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    tsSustainSlider.setTextValueSuffix(" dB");
+    tsSustainSlider.setTooltip("Boost or attenuate the sustained portion of the signal.");
+    addAndMakeVisible(tsSustainSlider);
+    tsSustainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_TS_SUSTAIN,
+        tsSustainSlider);
+
+    // TS Sensitivity slider
+    tsSensitivityLabel.setText("Sensitivity", juce::dontSendNotification);
+    tsSensitivityLabel.setJustificationType(juce::Justification::centredLeft);
+    tsSensitivityLabel.setTooltip("Threshold for detecting transients (0 = least sensitive, 100 = most sensitive).");
+    addAndMakeVisible(tsSensitivityLabel);
+
+    tsSensitivitySlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    tsSensitivitySlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    tsSensitivitySlider.setTextValueSuffix(" %");
+    tsSensitivitySlider.setTooltip("Threshold for detecting transients (0 = least sensitive, 100 = most sensitive).");
+    addAndMakeVisible(tsSensitivitySlider);
+    tsSensitivityAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_TS_SENSITIVITY,
+        tsSensitivitySlider);
+
+    // TS Bypass toggle
+    tsBypassToggle.setButtonText("Bypass Transient Shaper");
+    tsBypassToggle.setTooltip("When enabled, the transient shaper is fully transparent.");
+    addAndMakeVisible(tsBypassToggle);
+    tsBypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_TS_BYPASS,
+        tsBypassToggle);
+
     // ── Display toggle group ────────────────────────────────────────────
 
     displayGroup.setText("Display");
@@ -200,7 +275,7 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
     startTimerHz(60);
 
     // Set editor size
-    setSize(700, 620);
+    setSize(700, 800);
 }
 
 PhuBarkFFTCompressorAudioProcessorEditor::~PhuBarkFFTCompressorAudioProcessorEditor() {
@@ -243,9 +318,9 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
         return 2 * kGroupPaddingV + numRows * kRowHeight + (numRows - 1) * kRowGap;
     };
 
-    // ── Compressor controls group (5 rows) ──────────────────────────────
+    // ── Compressor controls group (6 rows) ──────────────────────────────
 
-    auto compGroupArea = area.removeFromTop(groupHeight(5));
+    auto compGroupArea = area.removeFromTop(groupHeight(6));
     compressorGroup.setBounds(compGroupArea);
     auto compContent = compGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
 
@@ -277,6 +352,42 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
     row = compContent.removeFromTop(kRowHeight);
     contourLabel.setBounds(row.removeFromLeft(kLabelWidth));
     contourCombo.setBounds(row);
+    compContent.removeFromTop(kRowGap);
+
+    // FFT Mode row
+    row = compContent.removeFromTop(kRowHeight);
+    fftModeLabel.setBounds(row.removeFromLeft(kLabelWidth));
+    fftModeCombo.setBounds(row);
+
+    area.removeFromTop(kGroupSpacing);
+
+    // ── Transient Shaper group (4 rows) ─────────────────────────────────
+
+    auto tsGroupArea = area.removeFromTop(groupHeight(4));
+    transientShaperGroup.setBounds(tsGroupArea);
+    auto tsContent = tsGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
+
+    // TS Attack row
+    row = tsContent.removeFromTop(kRowHeight);
+    tsAttackLabel.setBounds(row.removeFromLeft(kLabelWidth));
+    tsAttackSlider.setBounds(row);
+    tsContent.removeFromTop(kRowGap);
+
+    // TS Sustain row
+    row = tsContent.removeFromTop(kRowHeight);
+    tsSustainLabel.setBounds(row.removeFromLeft(kLabelWidth));
+    tsSustainSlider.setBounds(row);
+    tsContent.removeFromTop(kRowGap);
+
+    // TS Sensitivity row
+    row = tsContent.removeFromTop(kRowHeight);
+    tsSensitivityLabel.setBounds(row.removeFromLeft(kLabelWidth));
+    tsSensitivitySlider.setBounds(row);
+    tsContent.removeFromTop(kRowGap);
+
+    // TS Bypass row
+    row = tsContent.removeFromTop(kRowHeight);
+    tsBypassToggle.setBounds(row);
 
     area.removeFromTop(kGroupSpacing);
 
