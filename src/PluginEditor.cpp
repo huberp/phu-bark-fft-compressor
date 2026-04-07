@@ -178,6 +178,23 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_FFT_MODE,
         fftModeCombo);
 
+    // Smoothing Tap Length combo box
+    smoothingTapsLabel.setText("Smoothing Taps", juce::dontSendNotification);
+    smoothingTapsLabel.setJustificationType(juce::Justification::centredLeft);
+    smoothingTapsLabel.setTooltip("Number of taps used for per-bin gain smoothing between Bark bands. "
+                                  "Higher values produce smoother transitions.");
+    addAndMakeVisible(smoothingTapsLabel);
+
+    smoothingTapsCombo.addItem("3 taps", 1);
+    smoothingTapsCombo.addItem("5 taps", 2);
+    smoothingTapsCombo.addItem("7 taps", 3);
+    smoothingTapsCombo.setTooltip("Number of taps used for per-bin gain smoothing between Bark bands. "
+                                  "Higher values produce smoother transitions.");
+    addAndMakeVisible(smoothingTapsCombo);
+    smoothingTapsAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_SMOOTHING_TAPS,
+        smoothingTapsCombo);
+
     // ── Transient Shaper group ──────────────────────────────────────────
 
     transientShaperGroup.setText("Transient Shaper");
@@ -322,9 +339,9 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
         return 2 * kGroupPaddingV + numRows * kRowHeight + (numRows - 1) * kRowGap;
     };
 
-    // ── Compressor controls group (6 rows) ──────────────────────────────
+    // ── Compressor controls group (7 rows) ──────────────────────────────
 
-    auto compGroupArea = area.removeFromTop(groupHeight(6));
+    auto compGroupArea = area.removeFromTop(groupHeight(7));
     compressorGroup.setBounds(compGroupArea);
     auto compContent = compGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
 
@@ -362,6 +379,13 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
     row = compContent.removeFromTop(kRowHeight);
     fftModeLabel.setBounds(row.removeFromLeft(kLabelWidth));
     fftModeCombo.setBounds(row);
+
+    compContent.removeFromTop(kRowGap);
+
+    // Smoothing Taps row
+    row = compContent.removeFromTop(kRowHeight);
+    smoothingTapsLabel.setBounds(row.removeFromLeft(kLabelWidth));
+    smoothingTapsCombo.setBounds(row);
 
     area.removeFromTop(kGroupSpacing);
 

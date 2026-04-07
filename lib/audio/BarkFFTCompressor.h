@@ -94,8 +94,10 @@ class BarkFFTCompressor {
 
         // Resize all dynamic buffers.
         const int ringSize = currentFFTSize * 2;
-        hannWindow    .assign(currentFFTSize, 0.0f);
-        binToBand     .assign(currentNumBins, 0);
+        hannWindow      .assign(currentFFTSize, 0.0f);
+        binToBand       .assign(currentNumBins, 0);
+        binGains        .assign(currentNumBins, 1.0f);
+        binGainsSmoothed.assign(currentNumBins, 1.0f);
         inputRingMono .assign(ringSize, 0.0f);
         inputRingL    .assign(ringSize, 0.0f);
         inputRingR    .assign(ringSize, 0.0f);
@@ -168,6 +170,13 @@ class BarkFFTCompressor {
             // No recomputation needed - we index into the precomputed table at runtime
         }
     }
+
+    /** Set the number of taps for per-bin gain smoothing (must be odd, e.g. 3, 5, or 7). */
+    void setSmoothingTapLength(int taps) {
+        smoothingTapLength = (taps >= 1) ? taps : 1;
+    }
+
+    int getSmoothingTapLength() const { return smoothingTapLength; }
 
     // ── Per-sample processing ────────────────────────────────────────────
 
@@ -486,6 +495,28 @@ class BarkFFTCompressor {
             bandGainLinear[i] = std::pow(10.0f, smoothedGainReductionDb[i] / 20.0f);
         }
 
+        // ── Step 2b: Build per-bin gain array and apply smoothing ────────
+        // Each bin starts with its Bark band's gain value.
+        for (int k = 0; k < currentNumBins; ++k)
+            binGains[k] = bandGainLinear[binToBand[k]];
+
+        // Moving-average smoothing with edge-repeat boundary handling.
+        if (smoothingTapLength > 1) {
+            const int half = smoothingTapLength / 2;
+            const float invTaps = 1.0f / static_cast<float>(smoothingTapLength);
+            for (int k = 0; k < currentNumBins; ++k) {
+                float sum = 0.0f;
+                for (int t = -half; t <= half; ++t) {
+                    int idx = k + t;
+                    if (idx < 0) idx = 0;
+                    if (idx >= currentNumBins) idx = currentNumBins - 1;
+                    sum += binGains[idx];
+                }
+                binGainsSmoothed[k] = sum * invTaps;
+            }
+            std::swap(binGains, binGainsSmoothed);
+        }
+
         // ── Steps 3 & 4: Stereo synthesis ────────────────────────────────
         // For each channel: window + FFT -> apply same per-band gains -> IFFT -> OLA.
         //
@@ -512,7 +543,7 @@ class BarkFFTCompressor {
             fft->performRealOnlyForwardTransform(buf.data());
 
             for (int k = 0; k < currentNumBins; ++k) {
-                float g = bandGainLinear[binToBand[k]];
+                float g = binGains[k];
                 buf[k * 2]     *= g;
                 buf[k * 2 + 1] *= g;
             }
@@ -551,6 +582,7 @@ class BarkFFTCompressor {
     float attackMs          = 10.0f;
     float releaseMs         = 100.0f;
     ContourPreset currentPreset = ContourPreset::ISO226_40Phon;
+    int   smoothingTapLength    = 5; // number of taps for per-bin gain smoothing (odd)
 
     // ── Smoothing coefficients ───────────────────────────────────────────
 
@@ -561,6 +593,8 @@ class BarkFFTCompressor {
 
     std::vector<float> hannWindow;    // [currentFFTSize]
     std::vector<int>   binToBand;     // [currentNumBins]
+    std::vector<float> binGains;          // [currentNumBins] per-bin gain (smoothed)
+    std::vector<float> binGainsSmoothed;  // [currentNumBins] smoothing scratch buffer
     std::array<int, NUM_BARK_BANDS> binsPerBand{};
     std::array<float, NUM_BARK_BANDS> barkBandCenterFreqs{};
     std::array<float, NUM_BARK_BANDS> barkBandLowFreqs{};

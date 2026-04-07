@@ -60,6 +60,7 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     static constexpr const char* PARAM_TS_SUSTAIN   = "ts_sustain_db";
     static constexpr const char* PARAM_TS_SENSITIVITY = "ts_sensitivity";
     static constexpr const char* PARAM_TS_BYPASS    = "ts_bypass";
+    static constexpr const char* PARAM_SMOOTHING_TAPS = "smoothing_taps";
 
   private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -77,6 +78,7 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     std::atomic<float>* tsSustainParam    = nullptr;
     std::atomic<float>* tsSensitivityParam = nullptr;
     std::atomic<float>* tsBypassParam     = nullptr;
+    std::atomic<float>* smoothingTapsParam = nullptr;
 
     // Tracks the last applied FFT mode to detect changes in processBlock
     int lastFFTModeIndex = 0;
