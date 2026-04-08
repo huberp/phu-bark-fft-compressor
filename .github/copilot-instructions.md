@@ -10,8 +10,9 @@ This is a JUCE-based audio plugin project (VST3 Bark-band FFT compressor).
 
 ### Before Building on Windows (PowerShell)
 1. Initialize submodules: `git submodule update --init --recursive`
-2. Configure: `cmake --preset vs2026-x64`
-3. Build: `cmake --build --preset release`
+2. Find cmake executable with script .\scripts\find-cmake.ps1. Don't try to use cmake without this step, as it may not be in your PATH.
+3. Configure: `cmake --preset vs2026-x64`
+4. Build: `cmake --build --preset release`
 
 ### Build Timeouts
 - Use fewer parallel jobs on CI: `cmake --build --preset linux-build -j2`

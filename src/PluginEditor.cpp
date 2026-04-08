@@ -6,47 +6,68 @@
 // ============================================================================
 
 void PhuBarkFFTCompressorAudioProcessorEditor::GainReductionPanel::paint(juce::Graphics& g) {
-    auto bounds = getLocalBounds();
+    auto fullBounds = getLocalBounds();
 
     // Background
     g.setColour(juce::Colour(0xFF1A1A2Eu));
-    g.fillRect(bounds);
+    g.fillRect(fullBounds);
 
     // Title
     g.setColour(juce::Colours::white.withAlpha(0.6f));
     g.setFont(juce::Font(10.0f));
-    g.drawText("Gain Reduction (dB)", bounds.removeFromTop(14), juce::Justification::centred);
+    auto titleArea = fullBounds.removeFromTop(14);
+    g.drawText("Gain Reduction (dB)", titleArea, juce::Justification::centred);
+
+    auto bounds = fullBounds; // remaining area below title
 
     if (!compressorRef) return;
 
-    const int numBands = phu::audio::BarkFFTCompressor::NUM_BARK_BANDS;
-    float bandWidth = static_cast<float>(bounds.getWidth()) / static_cast<float>(numBands);
-    float maxGR = 30.0f; // Max gain reduction displayed (dB)
+    const int   numBands = phu::audio::BarkFFTCompressor::NUM_BARK_BANDS;
+    const float maxGR    = 30.0f;
+    const float bw       = static_cast<float>(bounds.getWidth());
+    const float bh       = static_cast<float>(bounds.getHeight());
+    const float bx       = static_cast<float>(bounds.getX());
+    const float by       = static_cast<float>(bounds.getY());
+
+    // Log-frequency mapping matching SpectrumDisplay (20 Hz – 20 kHz)
+    const float kMinFreq = SpectrumDisplay::MIN_FREQ;
+    const float kMaxFreq = SpectrumDisplay::MAX_FREQ;
+    const float logMin   = std::log10(kMinFreq);
+    const float logMax   = std::log10(kMaxFreq);
+    auto freqToX = [&](float freq) -> float {
+        freq = std::max(freq, kMinFreq);
+        return bx + ((std::log10(freq) - logMin) / (logMax - logMin)) * bw;
+    };
 
     for (int band = 0; band < numBands; ++band) {
-        float gr = compressorRef->getBandGainReductionDb(band); // negative = reduction
-        float grAbs = std::abs(gr);
-        float normalized = std::min(grAbs / maxGR, 1.0f);
+        float freqLow  = compressorRef->getBandLowFrequency(band);
+        float freqHigh = compressorRef->getBandHighFrequency(band);
+        freqLow  = std::max(freqLow,  kMinFreq);
+        freqHigh = std::min(freqHigh, kMaxFreq);
+        if (freqLow >= freqHigh) continue;
 
-        float x = static_cast<float>(bounds.getX()) + static_cast<float>(band) * bandWidth;
-        float barHeight = normalized * static_cast<float>(bounds.getHeight());
+        float xLeft  = freqToX(freqLow);
+        float xRight = freqToX(freqHigh);
+        float barW   = xRight - xLeft;
 
-        // Draw from top down (gain reduction is shown as bars growing downward)
+        float gr         = compressorRef->getBandGainReductionDb(band);
+        float normalized = std::min(std::abs(gr) / maxGR, 1.0f);
+        float barHeight  = normalized * bh;
+
         juce::Colour barColour = SpectrumDisplay::getBandColour(band);
 
         if (barHeight > 0.5f) {
             g.setColour(barColour.withAlpha(0.7f));
-            g.fillRect(x + 1.0f, static_cast<float>(bounds.getY()),
-                       bandWidth - 2.0f, barHeight);
+            g.fillRect(xLeft + 1.0f, by, barW - 2.0f, barHeight);
         }
 
-        // Band number label at bottom
+        // Band number label at bottom, centred in the bar
+        float centerX = (xLeft + xRight) * 0.5f;
         g.setColour(juce::Colours::white.withAlpha(0.3f));
         g.setFont(juce::Font(8.0f));
         g.drawText(juce::String(band + 1),
-                   static_cast<int>(x), bounds.getBottom() - 10,
-                   static_cast<int>(bandWidth), 10,
-                   juce::Justification::centred);
+                   static_cast<int>(centerX) - 8, bounds.getBottom() - 10,
+                   16, 10, juce::Justification::centred);
     }
 
     // Scale labels
@@ -57,6 +78,51 @@ void PhuBarkFFTCompressorAudioProcessorEditor::GainReductionPanel::paint(juce::G
     g.drawText(juce::String(static_cast<int>(-maxGR)),
                bounds.getX() - 24, bounds.getBottom() - 8, 22, 12,
                juce::Justification::centredRight);
+
+    // ── Per-bin smoothed GR curve (log-freq x, matching bars above) ───
+    if (showGRCurve) {
+        const int   numBins = compressorRef->getNumBins();
+        const int   fftSize = compressorRef->getCurrentFFTSize();
+        const float sr      = compressorRef->getSampleRate();
+
+        if (numBins > 0 && fftSize > 0 && sr > 0.0f) {
+            constexpr int kSamplesPerBand = 8;
+            juce::Path curvePath;
+            bool started = false;
+
+            for (int band = 0; band < numBands; ++band) {
+                float freqLow  = compressorRef->getBandLowFrequency(band);
+                float freqHigh = compressorRef->getBandHighFrequency(band);
+
+                for (int s = 0; s <= kSamplesPerBand; ++s) {
+                    float frac = static_cast<float>(s) / static_cast<float>(kSamplesPerBand);
+                    float freq = freqLow + frac * (freqHigh - freqLow);
+                    int bin = static_cast<int>(freq * static_cast<float>(fftSize) / sr);
+                    if (bin < 0) bin = 0;
+                    if (bin >= numBins) bin = numBins - 1;
+
+                    float gainDb = compressorRef->getBinGainDb(bin);
+                    float grAbs  = std::min(std::abs(gainDb) / maxGR, 1.0f);
+
+                    float x = freqToX(std::max(freq, kMinFreq));
+                    float y = by + grAbs * bh;
+
+                    if (!started) {
+                        curvePath.startNewSubPath(x, y);
+                        started = true;
+                    } else {
+                        curvePath.lineTo(x, y);
+                    }
+                }
+            }
+
+            if (started) {
+                g.setColour(juce::Colours::white.withAlpha(0.85f));
+                g.strokePath(curvePath, juce::PathStrokeType(1.5f,
+                    juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            }
+        }
+    }
 }
 
 // ============================================================================
@@ -178,22 +244,21 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_FFT_MODE,
         fftModeCombo);
 
-    // Smoothing Tap Length combo box
-    smoothingTapsLabel.setText("Smoothing Taps", juce::dontSendNotification);
-    smoothingTapsLabel.setJustificationType(juce::Justification::centredLeft);
-    smoothingTapsLabel.setTooltip("Number of taps used for per-bin gain smoothing between Bark bands. "
-                                  "Higher values produce smoother transitions.");
-    addAndMakeVisible(smoothingTapsLabel);
+    // Smoothing slider
+    smoothingLabel.setText("Smoothing Taps", juce::dontSendNotification);
+    smoothingLabel.setJustificationType(juce::Justification::centredLeft);
+    smoothingLabel.setTooltip("Per-bin gain smoothing amount using bidirectional IIR. "
+                              "0 = no smoothing; 1 = maximum smoothing.");
+    addAndMakeVisible(smoothingLabel);
 
-    smoothingTapsCombo.addItem("3 taps", 1);
-    smoothingTapsCombo.addItem("5 taps", 2);
-    smoothingTapsCombo.addItem("7 taps", 3);
-    smoothingTapsCombo.setTooltip("Number of taps used for per-bin gain smoothing between Bark bands. "
-                                  "Higher values produce smoother transitions.");
-    addAndMakeVisible(smoothingTapsCombo);
-    smoothingTapsAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
-        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_SMOOTHING_TAPS,
-        smoothingTapsCombo);
+    smoothingSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    smoothingSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    smoothingSlider.setTooltip("Per-bin gain smoothing amount using bidirectional IIR. "
+                               "0 = no smoothing; 1 = maximum smoothing.");
+    addAndMakeVisible(smoothingSlider);
+    smoothingAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_SMOOTHING,
+        smoothingSlider);
 
     // ── Transient Shaper group ──────────────────────────────────────────
 
@@ -292,11 +357,18 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
     };
     addAndMakeVisible(barkEnergyToggle);
 
+    grCurveToggle.setButtonText("GR Curve");
+    grCurveToggle.setToggleState(false, juce::dontSendNotification);
+    grCurveToggle.onClick = [this]() {
+        gainReductionPanel.setShowGRCurve(grCurveToggle.getToggleState());
+    };
+    addAndMakeVisible(grCurveToggle);
+
     // Start UI timer at 60 Hz
     startTimerHz(60);
 
     // Set editor size
-    setSize(700, 800);
+    setSize(700, 840);
 }
 
 PhuBarkFFTCompressorAudioProcessorEditor::~PhuBarkFFTCompressorAudioProcessorEditor() {
@@ -384,8 +456,8 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
 
     // Smoothing Taps row
     row = compContent.removeFromTop(kRowHeight);
-    smoothingTapsLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    smoothingTapsCombo.setBounds(row);
+    smoothingLabel.setBounds(row.removeFromLeft(kLabelWidth));
+    smoothingSlider.setBounds(row);
 
     area.removeFromTop(kGroupSpacing);
 
@@ -419,15 +491,17 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
 
     area.removeFromTop(kGroupSpacing);
 
-    // ── Display toggles group (2 rows) ──────────────────────────────────
+    // ── Display toggles group (3 rows) ──────────────────────────────
 
-    auto displayGroupArea = area.removeFromTop(groupHeight(2));
+    auto displayGroupArea = area.removeFromTop(groupHeight(3));
     displayGroup.setBounds(displayGroupArea);
     auto displayContent = displayGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
 
+    // Compute toggle width once so all three rows are identical
+    const int toggleWidth = (displayContent.getWidth() - 10) / 2;
+
     // Row 1: Input FFT | Output FFT
     auto toggleRow = displayContent.removeFromTop(kRowHeight);
-    int toggleWidth = (toggleRow.getWidth() - 10) / 2;
     inputFFTToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
     toggleRow.removeFromLeft(10);
     outputFFTToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
@@ -438,6 +512,11 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
     contourToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
     toggleRow.removeFromLeft(10);
     barkEnergyToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+    displayContent.removeFromTop(kRowGap);
+
+    // Row 3: GR Curve
+    toggleRow = displayContent.removeFromTop(kRowHeight);
+    grCurveToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
 }
 
 // ============================================================================

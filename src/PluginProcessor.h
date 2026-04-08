@@ -60,17 +60,14 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     static constexpr const char* PARAM_TS_SUSTAIN   = "ts_sustain_db";
     static constexpr const char* PARAM_TS_SENSITIVITY = "ts_sensitivity";
     static constexpr const char* PARAM_TS_BYPASS    = "ts_bypass";
-    static constexpr const char* PARAM_SMOOTHING_TAPS = "smoothing_taps";
+    static constexpr const char* PARAM_SMOOTHING    = "smoothing";
 
   private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    /** Maps a smoothing-taps choice index (0, 1, 2) to an actual tap count (3, 5, 7). */
-    static int smoothingTapChoiceToCount(int choiceIndex) noexcept {
-        static const int kTapChoices[] = {3, 5, 7};
-        if (choiceIndex < 0) choiceIndex = 0;
-        if (choiceIndex > 2) choiceIndex = 2;
-        return kTapChoices[choiceIndex];
+    /** Maps smoothing amount [0,1] to IIR alpha: 0=no smoothing, 1=max smoothing. */
+    static float smoothingAmountToAlpha(float amount) noexcept {
+        return 1.0f - amount * 0.97f; // alpha range [0.03, 1.0]
     }
 
     juce::AudioProcessorValueTreeState apvts;
@@ -86,7 +83,7 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     std::atomic<float>* tsSustainParam    = nullptr;
     std::atomic<float>* tsSensitivityParam = nullptr;
     std::atomic<float>* tsBypassParam     = nullptr;
-    std::atomic<float>* smoothingTapsParam = nullptr;
+    std::atomic<float>* smoothingParam    = nullptr;
 
     // Tracks the last applied FFT mode to detect changes in processBlock
     int lastFFTModeIndex = 0;

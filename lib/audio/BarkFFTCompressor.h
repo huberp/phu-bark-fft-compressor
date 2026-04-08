@@ -97,7 +97,7 @@ class BarkFFTCompressor {
         hannWindow      .assign(currentFFTSize, 0.0f);
         binToBand       .assign(currentNumBins, 0);
         binGains        .assign(currentNumBins, 1.0f);
-        binGainsSmoothed.assign(currentNumBins, 1.0f);
+        binLogFreq      .assign(currentNumBins, 0.0f);
         inputRingMono .assign(ringSize, 0.0f);
         inputRingL    .assign(ringSize, 0.0f);
         inputRingR    .assign(ringSize, 0.0f);
@@ -171,12 +171,16 @@ class BarkFFTCompressor {
         }
     }
 
-    /** Set the number of taps for per-bin gain smoothing (must be odd, e.g. 3, 5, or 7). */
-    void setSmoothingTapLength(int taps) {
-        smoothingTapLength = (taps >= 1) ? taps : 1;
+    /**
+     * Set the per-bin gain smoothing coefficient for the bidirectional one-pole IIR.
+     * alpha = 1.0 → no smoothing (identity); alpha approaching 0 → maximum smoothing.
+     * Effective transition width ≈ 1/(1-alpha) bins per pass (squared by the bidir pass).
+     */
+    void setSmoothingAlpha(float alpha) {
+        smoothingAlpha = std::max(0.01f, std::min(1.0f, alpha));
     }
 
-    int getSmoothingTapLength() const { return smoothingTapLength; }
+    float getSmoothingAlpha() const { return smoothingAlpha; }
 
     // ── Per-sample processing ────────────────────────────────────────────
 
@@ -221,6 +225,19 @@ class BarkFFTCompressor {
     }
 
     // ── UI accessors (read from UI thread) ───────────────────────────────
+
+    /** Total number of FFT bins (valid after prepare()). */
+    int getNumBins() const { return currentNumBins; }
+
+    /**
+     * Per-bin smoothed gain in dB (≤ 0) for visualization.
+     * Read from UI thread — floating-point tearing is acceptable for display.
+     */
+    float getBinGainDb(int bin) const {
+        if (bin >= 0 && bin < currentNumBins)
+            return 20.0f * std::log10(std::max(binGains[bin], 1e-10f));
+        return 0.0f;
+    }
 
     /** Get per-band gain reduction in dB (negative = compression). */
     float getBandGainReductionDb(int band) const {
@@ -357,6 +374,30 @@ class BarkFFTCompressor {
             barkBandHighFreqs[i] = barkToFreq(highBark);
             barkBandCenterFreqs[i] = barkToFreq(centerBark);
         }
+
+        // ── Precompute log-frequency lookup tables ────────────────────────
+        //
+        // Used in processFFTFrame() to interpolate per-bin gains smoothly
+        // between adjacent Bark band centres without any transcendental calls
+        // on the audio thread.  Both arrays are indexed by bin k.
+        //
+        //   binLogFreq[k]       — log10 of the bin's centre frequency in Hz
+        //   bandCenterLogFreq[i]— log10 of each Bark band's centre frequency
+        //
+        // Why log-frequency?  The Bark scale (and human pitch perception) is
+        // approximately logarithmic in Hz, so linearly interpolating *in dB*
+        // between two points that are equally-spaced on a log-Hz axis gives
+        // a perceptually smooth spectral envelope — exactly what an analogue
+        // multiband processor produces at its crossover transitions.
+        binLogFreq.assign(currentNumBins, 0.0f);
+        constexpr float kLogFreqFloor = -0.30103f; // log10(0.5 Hz) — floor for DC/sub-Hz bins
+        for (int k = 0; k < currentNumBins; ++k) {
+            float binFreq = (static_cast<float>(k) * currentSampleRate)
+                            / static_cast<float>(currentFFTSize);
+            binLogFreq[k] = (binFreq > 0.5f) ? std::log10(binFreq) : kLogFreqFloor;
+        }
+        for (int i = 0; i < NUM_BARK_BANDS; ++i)
+            bandCenterLogFreq[i] = std::log10(std::max(barkBandCenterFreqs[i], 0.5f));
     }
 
     /**
@@ -495,28 +536,108 @@ class BarkFFTCompressor {
             bandGainLinear[i] = std::pow(10.0f, smoothedGainReductionDb[i] / 20.0f);
         }
 
-        // ── Step 2b: Build per-bin gain array and apply smoothing ────────
-        // Each bin starts with its Bark band's gain value.
-        for (int k = 0; k < currentNumBins; ++k)
-            binGains[k] = bandGainLinear[binToBand[k]];
+        // ── Step 2b: Per-bin gain via log-frequency interpolation ────────
+        //
+        // WHY NOT PIECEWISE-CONSTANT (the naive approach)?
+        // ─────────────────────────────────────────────────
+        // Assigning one gain value per Bark band:
+        //
+        //   binGains[k] = bandGainLinear[binToBand[k]]
+        //
+        // creates 24 rectangular amplitude steps in the frequency domain.
+        // A rectangular step in spectrum space is equivalent to a brickwall
+        // filter whose time-domain impulse response is a sinc function that
+        // lasts the full analysis window duration (~46ms at 44.1kHz / 2048pt).
+        // When the compressor drives the step depth to 6–15dB (ratio > 2:1),
+        // this produces clearly audible pre-echo, ringing, and smearing
+        // artefacts — especially on transients.
+        //
+        // A short IIR pass (alpha ≈ 0.7, ~3-bin transition width) only
+        // mitigates low-frequency bands (2–5 bins wide per Bark unit at
+        // 44.1kHz); high-frequency bands span 200–300 bins so a 3-bin blur
+        // has negligible effect at those edges.
+        //
+        // SOLUTION: log-frequency interpolation in dB space
+        // ─────────────────────────────────────────────────
+        // Instead of a step function, we use the 24 Bark band centre gains as
+        // *knots* of a piecewise-linear curve on the log-Hz axis.  Each bin's
+        // gain is an exponential (dB-space) blend that is proportional to its
+        // log-frequency distance between the two nearest band centres.
+        //
+        // This gives a smooth, globally monotone spectral gain envelope with
+        // NO sharp edges anywhere → the effective filter is smooth → no ringing.
+        //
+        // CORRECTNESS:
+        //   • At ratio 1:1 all bandGainLinear[i] == 1.0 → all gainLn == 0
+        //     → exp(0) == 1.0 → perfect unity gain, bit-for-bit identical to
+        //     bypassing the gain stage.
+        //   • Interpolation in ln space == geometric mean in linear space,
+        //     which is the perceptually correct in-between point for gains
+        //     (arithmetic mean of dB values).
+        //   • Each bin's result is still determined primarily by the band it
+        //     belongs to; the neighbouring band's gain only influences the
+        //     transition region between the two centres.
+        {
+            // Project per-band linear gains into natural-log (dB-proportional) space.
+            std::array<float, NUM_BARK_BANDS> bandGainLn{};
+            for (int i = 0; i < NUM_BARK_BANDS; ++i)
+                bandGainLn[i] = std::log(std::max(bandGainLinear[i], 1e-10f));
 
-        // Moving-average smoothing with edge-repeat boundary handling.
-        if (smoothingTapLength > 1) {
-            const int half = smoothingTapLength / 2;
-            // Use the actual number of samples in the window (2*half+1) as the
-            // divisor so the algorithm is correct even when smoothingTapLength is even.
-            const float invActualTaps = 1.0f / static_cast<float>(2 * half + 1);
             for (int k = 0; k < currentNumBins; ++k) {
-                float sum = 0.0f;
-                for (int t = -half; t <= half; ++t) {
-                    int idx = k + t;
-                    if (idx < 0) idx = 0;
-                    if (idx >= currentNumBins) idx = currentNumBins - 1;
-                    sum += binGains[idx];
+                const int   band    = binToBand[k];
+                const float logFreq = binLogFreq[k]; // precomputed in computeBinToBarkMapping
+                float gainLn;
+
+                if (logFreq <= bandCenterLogFreq[band]) {
+                    // Bin is at or below the current band's centre frequency.
+                    // Blend toward the next-lower band.
+                    if (band == 0) {
+                        gainLn = bandGainLn[0]; // flat extrapolation at the low end
+                    } else {
+                        const float lo  = bandCenterLogFreq[band - 1];
+                        const float hi  = bandCenterLogFreq[band];
+                        const float den = hi - lo;
+                        // t=0 → lower neighbour's gain, t=1 → this band's gain
+                        const float t = (den > 1e-10f)
+                            ? std::max(0.0f, std::min(1.0f, (logFreq - lo) / den))
+                            : 1.0f;
+                        gainLn = bandGainLn[band - 1] + t * (bandGainLn[band] - bandGainLn[band - 1]);
+                    }
+                } else {
+                    // Bin is above the current band's centre frequency.
+                    // Blend toward the next-higher band.
+                    if (band >= NUM_BARK_BANDS - 1) {
+                        gainLn = bandGainLn[NUM_BARK_BANDS - 1]; // flat extrapolation at high end
+                    } else {
+                        const float lo  = bandCenterLogFreq[band];
+                        const float hi  = bandCenterLogFreq[band + 1];
+                        const float den = hi - lo;
+                        // t=0 → this band's gain, t=1 → upper neighbour's gain
+                        const float t = (den > 1e-10f)
+                            ? std::max(0.0f, std::min(1.0f, (logFreq - lo) / den))
+                            : 0.0f;
+                        gainLn = bandGainLn[band] + t * (bandGainLn[band + 1] - bandGainLn[band]);
+                    }
                 }
-                binGainsSmoothed[k] = sum * invActualTaps;
+
+                binGains[k] = std::exp(gainLn);
             }
-            std::swap(binGains, binGainsSmoothed);
+        }
+
+        // Optional secondary IIR pass: gentle cosmetic finish.
+        // With the log-frequency interpolation above producing an already-smooth
+        // spectral envelope, this pass only rounds off micro-steps that arise
+        // at the coarse boundary between the discrete bin grid and the
+        // continuous interpolation curve.  It has no effect on audible ringing.
+        if (smoothingAlpha < 0.99f) {
+            const float a = smoothingAlpha;
+            const float b = 1.0f - a;
+            // Forward pass
+            for (int k = 1; k < currentNumBins; ++k)
+                binGains[k] = a * binGains[k] + b * binGains[k - 1];
+            // Backward pass (zero-phase: two passes cancel group delay)
+            for (int k = currentNumBins - 2; k >= 0; --k)
+                binGains[k] = a * binGains[k] + b * binGains[k + 1];
         }
 
         // ── Steps 3 & 4: Stereo synthesis ────────────────────────────────
@@ -584,7 +705,7 @@ class BarkFFTCompressor {
     float attackMs          = 10.0f;
     float releaseMs         = 100.0f;
     ContourPreset currentPreset = ContourPreset::ISO226_40Phon;
-    int   smoothingTapLength    = 5; // number of taps for per-bin gain smoothing (odd)
+    float smoothingAlpha        = 0.70f; // bidirectional IIR coefficient (1=off, 0=max smooth)
 
     // ── Smoothing coefficients ───────────────────────────────────────────
 
@@ -595,8 +716,18 @@ class BarkFFTCompressor {
 
     std::vector<float> hannWindow;    // [currentFFTSize]
     std::vector<int>   binToBand;     // [currentNumBins]
-    std::vector<float> binGains;          // [currentNumBins] active per-bin gain buffer (smoothed after processFFTFrame)
-    std::vector<float> binGainsSmoothed;  // [currentNumBins] smoothing scratch buffer
+    // Per-bin gain array. Populated each frame by log-frequency interpolation
+    // (processFFTFrame step 2b), then optionally refined by the secondary IIR pass.
+    std::vector<float> binGains;
+
+    // Precomputed log10(bin_centre_frequency_hz) for every FFT bin.
+    // Avoids transcendental calls inside the audio-thread hot loop.
+    // Rebuilt whenever the FFT size or sample rate changes (computeBinToBarkMapping).
+    std::vector<float> binLogFreq;
+
+    // Precomputed log10(band_centre_frequency_hz) for all 24 Bark bands.
+    // Used as the interpolation knot positions in processFFTFrame step 2b.
+    std::array<float, NUM_BARK_BANDS> bandCenterLogFreq{};
     std::array<int, NUM_BARK_BANDS> binsPerBand{};
     std::array<float, NUM_BARK_BANDS> barkBandCenterFreqs{};
     std::array<float, NUM_BARK_BANDS> barkBandLowFreqs{};

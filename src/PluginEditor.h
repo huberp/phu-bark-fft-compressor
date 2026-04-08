@@ -33,8 +33,10 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
       public:
         void paint(juce::Graphics& g) override;
         void setCompressor(const phu::audio::BarkFFTCompressor* comp) { compressorRef = comp; }
+        void setShowGRCurve(bool v) { showGRCurve = v; }
       private:
         const phu::audio::BarkFFTCompressor* compressorRef = nullptr;
+        bool showGRCurve = false;
     };
     GainReductionPanel gainReductionPanel;
 
@@ -65,9 +67,9 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     juce::Label fftModeLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> fftModeAttachment;
 
-    juce::ComboBox smoothingTapsCombo;
-    juce::Label smoothingTapsLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> smoothingTapsAttachment;
+    juce::Slider smoothingSlider;
+    juce::Label smoothingLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> smoothingAttachment;
 
     // ── Transient Shaper controls ────────────────────────────────────────
     juce::GroupComponent transientShaperGroup;
@@ -93,6 +95,7 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     juce::ToggleButton outputFFTToggle;
     juce::ToggleButton contourToggle;
     juce::ToggleButton barkEnergyToggle;
+    juce::ToggleButton grCurveToggle;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PhuBarkFFTCompressorAudioProcessorEditor)
 };

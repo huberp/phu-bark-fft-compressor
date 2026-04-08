@@ -246,10 +246,10 @@ void SpectrumDisplay::drawContour(juce::Graphics& g, juce::Rectangle<int> bounds
             continue;
 
         float adjustDb = compressorRef->getContourAdjustmentDb(band);
-        // Map contour adjustment: the contour represents "required SPL"
-        // Invert it for display: higher SPL needed = lower on display
-        // Show relative to a reference level (e.g., -40 dB)
-        float displayDb = -40.0f + adjustDb;
+        // The contour threshold in the DSP is: thresholdDb + splAdjustment[band]
+        // Display at exactly that value so the yellow line and the energy bars
+        // share the same dBFS coordinate system.
+        float displayDb = compressorRef->getThresholdDb() + adjustDb;
 
         float x = freqToX(centerFreq, w) + x0;
         float y = dbToY(displayDb, h) + y0;
