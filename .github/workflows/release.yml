@@ -19,10 +19,10 @@ jobs:
           submodules: recursive
 
       - name: Configure CMake
-        run: cmake --build build --config Release
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build Release
-        run: cmake --build --preset release
+        run: cmake --build build --config Release
 
       - name: Validate VST3 with pluginval
         shell: pwsh
