@@ -545,9 +545,9 @@ class BarkFFTCompressor {
                 float im = fftBuffer[k * 2 + 1];
                 float currentPhase = std::atan2(im, re);
                 float dp = currentPhase - lastPhase[k];
-                // Wrap delta-phase to [-pi, pi]
-                dp -= kTwoPi * std::floor((dp + kPi) / kTwoPi);
-                deltaPhase[k] = dp;
+                // Wrap delta-phase to (-pi, pi] using std::remainder, which is
+                // faster than the floor-based approach and available since C++11.
+                deltaPhase[k] = std::remainder(dp, kTwoPi);
                 lastPhase[k]  = currentPhase;
             }
         }
