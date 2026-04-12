@@ -50,7 +50,8 @@ A VST3 spectral compressor that operates independently on each of the 24 psychoa
 3. Rescan plugins in your DAW
 4. Load **PHU BARK FFT COMPRESSOR** on any track
 
-No external dependencies — the binary is self-contained.
+**Windows:** Requires the [Microsoft Visual C++ 2015–2022 Redistributable (x64)](https://aka.ms/vs/17/release/vc_redist.x64.exe). Already present if Visual Studio 2019 or 2022 is installed.  
+**Linux:** No external dependencies — the binary is self-contained.
 
 ### Controls
 
