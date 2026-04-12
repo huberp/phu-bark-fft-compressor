@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 #include <juce_dsp/juce_dsp.h>
+#include "memory/AlignedAllocator.h"
 
 namespace phu {
 namespace audio {
@@ -106,6 +107,19 @@ class BarkFFTCompressor {
         fftBuffer     .assign(ringSize, 0.0f);
         fftBufferL    .assign(ringSize, 0.0f);
         fftBufferR    .assign(ringSize, 0.0f);
+
+        // Verify 32-byte alignment of performance-critical buffers (debug only).
+        jassert (reinterpret_cast<uintptr_t>(hannWindow.data())    % 32 == 0);
+        jassert (reinterpret_cast<uintptr_t>(binGains.data())      % 32 == 0);
+        jassert (reinterpret_cast<uintptr_t>(binLogFreq.data())    % 32 == 0);
+        jassert (reinterpret_cast<uintptr_t>(inputRingMono.data()) % 32 == 0);
+        jassert (reinterpret_cast<uintptr_t>(inputRingL.data())    % 32 == 0);
+        jassert (reinterpret_cast<uintptr_t>(inputRingR.data())    % 32 == 0);
+        jassert (reinterpret_cast<uintptr_t>(outputRingL.data())   % 32 == 0);
+        jassert (reinterpret_cast<uintptr_t>(outputRingR.data())   % 32 == 0);
+        jassert (reinterpret_cast<uintptr_t>(fftBuffer.data())     % 32 == 0);
+        jassert (reinterpret_cast<uintptr_t>(fftBufferL.data())    % 32 == 0);
+        jassert (reinterpret_cast<uintptr_t>(fftBufferR.data())    % 32 == 0);
 
         // Pre-compute periodic Hann window (denominator = FFT_SIZE, not FFT_SIZE-1).
         // The periodic form satisfies the COLA condition at 50% overlap:
@@ -653,9 +667,9 @@ class BarkFFTCompressor {
         //   hann^2[n] + hann^2[n+N/2] = 0.25*(3 + cos(4*pi*n/N)) -- NOT constant --
         // which produces amplitude modulation at ~sampleRate/HOP_SIZE Hz (~43 Hz at 44.1 kHz).
 
-        auto synthesiseChannel = [&](const std::vector<float>& inRing,
-                                     std::vector<float>& outRing,
-                                     std::vector<float>& buf) {
+        auto synthesiseChannel = [&](const phu::memory::AlignedVector<float>& inRing,
+                                     phu::memory::AlignedVector<float>& outRing,
+                                     phu::memory::AlignedVector<float>& buf) {
             for (int i = 0; i < currentFFTSize; ++i) {
                 int ringIdx = (ringWritePos - currentFFTSize + i + ringSize) % ringSize;
                 buf[i] = inRing[ringIdx] * hannWindow[i];
@@ -714,16 +728,16 @@ class BarkFFTCompressor {
 
     // ── Pre-computed lookup tables (size depends on FFT mode) ────────────
 
-    std::vector<float> hannWindow;    // [currentFFTSize]
+    phu::memory::AlignedVector<float> hannWindow;    // [currentFFTSize]
     std::vector<int>   binToBand;     // [currentNumBins]
     // Per-bin gain array. Populated each frame by log-frequency interpolation
     // (processFFTFrame step 2b), then optionally refined by the secondary IIR pass.
-    std::vector<float> binGains;
+    phu::memory::AlignedVector<float> binGains;
 
     // Precomputed log10(bin_centre_frequency_hz) for every FFT bin.
     // Avoids transcendental calls inside the audio-thread hot loop.
     // Rebuilt whenever the FFT size or sample rate changes (computeBinToBarkMapping).
-    std::vector<float> binLogFreq;
+    phu::memory::AlignedVector<float> binLogFreq;
 
     // Precomputed log10(band_centre_frequency_hz) for all 24 Bark bands.
     // Used as the interpolation knot positions in processFFTFrame step 2b.
@@ -748,11 +762,11 @@ class BarkFFTCompressor {
     // Mono mix is used for analysis only.  L/R have independent synthesis
     // paths so per-band gains affect only the corresponding frequency range
     // in each channel (no cross-band pumping).
-    std::vector<float> inputRingMono;
-    std::vector<float> inputRingL;
-    std::vector<float> inputRingR;
-    std::vector<float> outputRingL;
-    std::vector<float> outputRingR;
+    phu::memory::AlignedVector<float> inputRingMono;
+    phu::memory::AlignedVector<float> inputRingL;
+    phu::memory::AlignedVector<float> inputRingR;
+    phu::memory::AlignedVector<float> outputRingL;
+    phu::memory::AlignedVector<float> outputRingR;
     int ringWritePos = 0;
     int samplesUntilNextFFT = 1024; // initialised to currentHopSize in prepare()
 
@@ -761,9 +775,9 @@ class BarkFFTCompressor {
     // fftBuffer  — analysis (mono mix)
     // fftBufferL — synthesis channel L
     // fftBufferR — synthesis channel R
-    std::vector<float> fftBuffer;
-    std::vector<float> fftBufferL;
-    std::vector<float> fftBufferR;
+    phu::memory::AlignedVector<float> fftBuffer;
+    phu::memory::AlignedVector<float> fftBufferL;
+    phu::memory::AlignedVector<float> fftBufferR;
 };
 
 } // namespace audio
