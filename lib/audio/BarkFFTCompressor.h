@@ -111,16 +111,27 @@ class BarkFFTCompressor {
         // Allocate phase vocoding buffers only when the feature is enabled.
         // Separate buffers for L and R because the two channels can have very
         // different phases and must be tracked independently.
+        // cosDelta/sinDelta are pre-computed in the phase-tracking loop so that the
+        // rotation loop contains only multiply-add operations and can be auto-vectorized
+        // by the compiler (std::cos/std::sin prevent SIMD auto-vectorization).
         if (phaseVocodingEnabled) {
             lastPhaseL .assign(currentNumBins, 0.0f);
             deltaPhaseL.assign(currentNumBins, 0.0f);
+            cosDeltaL  .assign(currentNumBins, 1.0f);
+            sinDeltaL  .assign(currentNumBins, 0.0f);
             lastPhaseR .assign(currentNumBins, 0.0f);
             deltaPhaseR.assign(currentNumBins, 0.0f);
+            cosDeltaR  .assign(currentNumBins, 1.0f);
+            sinDeltaR  .assign(currentNumBins, 0.0f);
         } else {
             phu::memory::AlignedVector<float>().swap(lastPhaseL);
             phu::memory::AlignedVector<float>().swap(deltaPhaseL);
+            phu::memory::AlignedVector<float>().swap(cosDeltaL);
+            phu::memory::AlignedVector<float>().swap(sinDeltaL);
             phu::memory::AlignedVector<float>().swap(lastPhaseR);
             phu::memory::AlignedVector<float>().swap(deltaPhaseR);
+            phu::memory::AlignedVector<float>().swap(cosDeltaR);
+            phu::memory::AlignedVector<float>().swap(sinDeltaR);
         }
 
         // Verify 32-byte alignment of performance-critical buffers (debug only).
@@ -179,8 +190,12 @@ class BarkFFTCompressor {
 
         if (!lastPhaseL.empty())  std::fill(lastPhaseL.begin(),  lastPhaseL.end(),  0.0f);
         if (!deltaPhaseL.empty()) std::fill(deltaPhaseL.begin(), deltaPhaseL.end(), 0.0f);
+        if (!cosDeltaL.empty())   std::fill(cosDeltaL.begin(),   cosDeltaL.end(),   1.0f);
+        if (!sinDeltaL.empty())   std::fill(sinDeltaL.begin(),   sinDeltaL.end(),   0.0f);
         if (!lastPhaseR.empty())  std::fill(lastPhaseR.begin(),  lastPhaseR.end(),  0.0f);
         if (!deltaPhaseR.empty()) std::fill(deltaPhaseR.begin(), deltaPhaseR.end(), 0.0f);
+        if (!cosDeltaR.empty())   std::fill(cosDeltaR.begin(),   cosDeltaR.end(),   1.0f);
+        if (!sinDeltaR.empty())   std::fill(sinDeltaR.begin(),   sinDeltaR.end(),   0.0f);
     }
 
     // ── Parameter setters ────────────────────────────────────────────────
@@ -705,7 +720,9 @@ class BarkFFTCompressor {
                                      phu::memory::AlignedVector<float>& outRing,
                                      phu::memory::AlignedVector<float>& buf,
                                      phu::memory::AlignedVector<float>& chLastPhase,
-                                     phu::memory::AlignedVector<float>& chDeltaPhase) {
+                                     phu::memory::AlignedVector<float>& chDeltaPhase,
+                                     phu::memory::AlignedVector<float>& chCosDelta,
+                                     phu::memory::AlignedVector<float>& chSinDelta) {
             for (int i = 0; i < currentFFTSize; ++i) {
                 int ringIdx = (ringWritePos - currentFFTSize + i + ringSize) % ringSize;
                 buf[i] = inRing[ringIdx] * hannWindow[i];
@@ -718,6 +735,11 @@ class BarkFFTCompressor {
             // Phase vocoding: compute per-bin delta-phase from this channel's FFT.
             // Phase MUST be tracked per channel because L and R can have dramatically
             // different phases; using the mono-mix phase for both channels would be wrong.
+            //
+            // std::cos / std::sin are scalar-only and prevent auto-vectorization, so they
+            // are computed here (scalar pass) and stored in chCosDelta / chSinDelta.
+            // The rotation loop below then contains only multiply-add operations and is
+            // fully auto-vectorizable by the compiler with AVX2 / NEON.
             if (phaseVocodingEnabled) {
                 for (int k = 0; k < currentNumBins; ++k) {
                     float re = buf[k * 2];
@@ -728,6 +750,8 @@ class BarkFFTCompressor {
                     // faster than the floor-based approach and available since C++11.
                     chDeltaPhase[k] = std::remainder(dp, kTwoPi);
                     chLastPhase[k]  = currentPhase;
+                    chCosDelta[k]   = std::cos(chDeltaPhase[k]);
+                    chSinDelta[k]   = std::sin(chDeltaPhase[k]);
                 }
             }
 
@@ -740,14 +764,14 @@ class BarkFFTCompressor {
             // Phase vocoding: rotate each bin's complex value by the per-channel
             // delta-phase computed above, so that consecutive synthesis frames
             // accumulate phase coherently and OLA artefacts are reduced.
+            // This loop is pure multiply-add (no transcendental calls) and is
+            // auto-vectorized by the compiler at -O2 / -O3 with AVX2 or NEON.
             if (phaseVocodingEnabled) {
                 for (int k = 0; k < currentNumBins; ++k) {
                     float re   = buf[k * 2];
                     float im   = buf[k * 2 + 1];
-                    float cosD = std::cos(chDeltaPhase[k]);
-                    float sinD = std::sin(chDeltaPhase[k]);
-                    buf[k * 2]     = re * cosD - im * sinD;
-                    buf[k * 2 + 1] = re * sinD + im * cosD;
+                    buf[k * 2]     = re * chCosDelta[k] - im * chSinDelta[k];
+                    buf[k * 2 + 1] = re * chSinDelta[k] + im * chCosDelta[k];
                 }
             }
 
@@ -760,8 +784,8 @@ class BarkFFTCompressor {
             }
         };
 
-        synthesiseChannel(inputRingL, outputRingL, fftBufferL, lastPhaseL, deltaPhaseL);
-        synthesiseChannel(inputRingR, outputRingR, fftBufferR, lastPhaseR, deltaPhaseR);
+        synthesiseChannel(inputRingL, outputRingL, fftBufferL, lastPhaseL, deltaPhaseL, cosDeltaL, sinDeltaL);
+        synthesiseChannel(inputRingR, outputRingR, fftBufferR, lastPhaseR, deltaPhaseR, cosDeltaR, sinDeltaR);
     }
 
     // ── FFT engine ───────────────────────────────────────────────────────
@@ -854,12 +878,21 @@ class BarkFFTCompressor {
     //
     // lastPhaseX[k]  — analysis phase of bin k from the previous frame (channel X).
     // deltaPhaseX[k] — wrapped phase advance of bin k between the two most recent
-    //                  frames (channel X); applied as a complex rotation before IFFT.
+    //                  frames (channel X).
+    // cosDeltaX[k]   — cos(deltaPhaseX[k]), pre-computed in the phase-tracking loop.
+    // sinDeltaX[k]   — sin(deltaPhaseX[k]), pre-computed in the phase-tracking loop.
+    //
+    // cos/sin are stored separately so the rotation loop (applied after gain) is
+    // pure multiply-add and can be auto-vectorized by the compiler (AVX2 / NEON).
     bool phaseVocodingEnabled = false;
     phu::memory::AlignedVector<float> lastPhaseL;   // [currentNumBins], disabled → empty
     phu::memory::AlignedVector<float> deltaPhaseL;  // [currentNumBins], disabled → empty
+    phu::memory::AlignedVector<float> cosDeltaL;    // [currentNumBins], disabled → empty
+    phu::memory::AlignedVector<float> sinDeltaL;    // [currentNumBins], disabled → empty
     phu::memory::AlignedVector<float> lastPhaseR;   // [currentNumBins], disabled → empty
     phu::memory::AlignedVector<float> deltaPhaseR;  // [currentNumBins], disabled → empty
+    phu::memory::AlignedVector<float> cosDeltaR;    // [currentNumBins], disabled → empty
+    phu::memory::AlignedVector<float> sinDeltaR;    // [currentNumBins], disabled → empty
 };
 
 } // namespace audio
