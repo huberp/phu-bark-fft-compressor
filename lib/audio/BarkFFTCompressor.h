@@ -108,6 +108,15 @@ class BarkFFTCompressor {
         fftBufferL    .assign(ringSize, 0.0f);
         fftBufferR    .assign(ringSize, 0.0f);
 
+        // Allocate phase vocoding buffers only when the feature is enabled.
+        if (phaseVocodingEnabled) {
+            lastPhase .assign(currentNumBins, 0.0f);
+            deltaPhase.assign(currentNumBins, 0.0f);
+        } else {
+            phu::memory::AlignedVector<float>().swap(lastPhase);
+            phu::memory::AlignedVector<float>().swap(deltaPhase);
+        }
+
         // Verify 32-byte alignment of performance-critical buffers (debug only).
         jassert (reinterpret_cast<uintptr_t>(hannWindow.data())    % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(binGains.data())      % 32 == 0);
@@ -161,6 +170,9 @@ class BarkFFTCompressor {
             currentBandGainReductionDb[i] = 0.0f;
             currentBandEnergyDb[i] = -100.0f;
         }
+
+        if (!lastPhase.empty())  std::fill(lastPhase.begin(),  lastPhase.end(),  0.0f);
+        if (!deltaPhase.empty()) std::fill(deltaPhase.begin(), deltaPhase.end(), 0.0f);
     }
 
     // ── Parameter setters ────────────────────────────────────────────────
@@ -195,6 +207,17 @@ class BarkFFTCompressor {
     }
 
     float getSmoothingAlpha() const { return smoothingAlpha; }
+
+    /**
+     * Enable or disable phase vocoding.
+     * When enabled, delta-phase is computed from consecutive analysis frames and
+     * applied as a phase rotation to synthesis bins before IFFT to maintain phase
+     * coherence across overlapping frames.
+     * Must be followed by a call to prepare() to allocate / free the phase buffers.
+     */
+    void setPhaseVocodingEnabled(bool enabled) { phaseVocodingEnabled = enabled; }
+
+    bool isPhaseVocodingEnabled() const { return phaseVocodingEnabled; }
 
     // ── Per-sample processing ────────────────────────────────────────────
 
@@ -324,7 +347,8 @@ class BarkFFTCompressor {
     }
 
   private:
-    static constexpr float kPi = 3.14159265358979323846f;
+    static constexpr float kPi    = 3.14159265358979323846f;
+    static constexpr float kTwoPi = 2.0f * kPi;
 
     // ── Static precomputations ───────────────────────────────────────────
 
@@ -510,6 +534,24 @@ class BarkFFTCompressor {
 
         fft->performRealOnlyForwardTransform(fftBuffer.data());
 
+        // ── Phase vocoding: compute per-bin delta-phase from analysis ─────
+        // When enabled, track the phase of each analysis bin between consecutive
+        // frames. The per-bin phase advance (deltaPhase) is applied as a complex
+        // rotation to both synthesis channels before the inverse FFT, maintaining
+        // phase coherence across overlapping frames and reducing OLA artefacts.
+        if (phaseVocodingEnabled) {
+            for (int k = 0; k < currentNumBins; ++k) {
+                float re = fftBuffer[k * 2];
+                float im = fftBuffer[k * 2 + 1];
+                float currentPhase = std::atan2(im, re);
+                float dp = currentPhase - lastPhase[k];
+                // Wrap delta-phase to (-pi, pi] using std::remainder, which is
+                // faster than the floor-based approach and available since C++11.
+                deltaPhase[k] = std::remainder(dp, kTwoPi);
+                lastPhase[k]  = currentPhase;
+            }
+        }
+
         // Accumulate power per Bark band
         std::array<float, NUM_BARK_BANDS> barkEnergies{};
         for (int k = 0; k < currentNumBins; ++k) {
@@ -685,6 +727,20 @@ class BarkFFTCompressor {
                 buf[k * 2 + 1] *= g;
             }
 
+            // Phase vocoding: rotate each bin's complex value by the analysis
+            // delta-phase computed above, so that consecutive synthesis frames
+            // accumulate phase coherently and OLA artefacts are reduced.
+            if (phaseVocodingEnabled) {
+                for (int k = 0; k < currentNumBins; ++k) {
+                    float re   = buf[k * 2];
+                    float im   = buf[k * 2 + 1];
+                    float cosD = std::cos(deltaPhase[k]);
+                    float sinD = std::sin(deltaPhase[k]);
+                    buf[k * 2]     = re * cosD - im * sinD;
+                    buf[k * 2 + 1] = re * sinD + im * cosD;
+                }
+            }
+
             fft->performRealOnlyInverseTransform(buf.data());
 
             // OLA: accumulate raw IFFT output -- no synthesis window, no scale factor.
@@ -778,6 +834,17 @@ class BarkFFTCompressor {
     phu::memory::AlignedVector<float> fftBuffer;
     phu::memory::AlignedVector<float> fftBufferL;
     phu::memory::AlignedVector<float> fftBufferR;
+
+    // ── Phase vocoding state ─────────────────────────────────────────────
+    //
+    // Allocated only when phaseVocodingEnabled == true (see prepare()).
+    // lastPhase[k]  — analysis phase of bin k from the previous frame.
+    // deltaPhase[k] — wrapped phase advance of bin k between the two most
+    //                 recent analysis frames; applied as a complex rotation
+    //                 to synthesis bins before IFFT.
+    bool phaseVocodingEnabled = false;
+    phu::memory::AlignedVector<float> lastPhase;   // [currentNumBins], disabled → empty
+    phu::memory::AlignedVector<float> deltaPhase;  // [currentNumBins], disabled → empty
 };
 
 } // namespace audio

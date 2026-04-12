@@ -260,6 +260,16 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_SMOOTHING,
         smoothingSlider);
 
+    // Phase Vocoding toggle
+    phaseVocodingToggle.setButtonText("Phase Vocoding");
+    phaseVocodingToggle.setTooltip("Enables phase vocoding to reduce phase artifacts and improve "
+                                   "transient response. Increases CPU usage slightly.");
+    addAndMakeVisible(phaseVocodingToggle);
+    phaseVocodingAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
+        audioProcessor.getAPVTS(),
+        PhuBarkFFTCompressorAudioProcessor::PARAM_PHASE_VOCODING_ENABLE,
+        phaseVocodingToggle);
+
     // ── Transient Shaper group ──────────────────────────────────────────
 
     transientShaperGroup.setText("Transient Shaper");
@@ -368,7 +378,7 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
     startTimerHz(60);
 
     // Set editor size
-    setSize(700, 840);
+    setSize(700, 868);
 }
 
 PhuBarkFFTCompressorAudioProcessorEditor::~PhuBarkFFTCompressorAudioProcessorEditor() {
@@ -411,9 +421,9 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
         return 2 * kGroupPaddingV + numRows * kRowHeight + (numRows - 1) * kRowGap;
     };
 
-    // ── Compressor controls group (7 rows) ──────────────────────────────
+    // ── Compressor controls group (8 rows) ──────────────────────────────
 
-    auto compGroupArea = area.removeFromTop(groupHeight(7));
+    auto compGroupArea = area.removeFromTop(groupHeight(8));
     compressorGroup.setBounds(compGroupArea);
     auto compContent = compGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
 
@@ -458,6 +468,12 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
     row = compContent.removeFromTop(kRowHeight);
     smoothingLabel.setBounds(row.removeFromLeft(kLabelWidth));
     smoothingSlider.setBounds(row);
+
+    compContent.removeFromTop(kRowGap);
+
+    // Phase Vocoding toggle row
+    row = compContent.removeFromTop(kRowHeight);
+    phaseVocodingToggle.setBounds(row);
 
     area.removeFromTop(kGroupSpacing);
 
