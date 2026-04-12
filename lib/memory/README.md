@@ -39,7 +39,7 @@ phu::memory::AlignedVector<float, 64> cacheAlignedBuffer;
 | Windows  | `_aligned_malloc`     | `_aligned_free`       |
 | POSIX    | `posix_memalign`      | `free`                |
 
-The allocation size is always rounded up to a multiple of the alignment boundary to satisfy the requirements of aligned allocation functions.
+The allocation size in bytes is always rounded up to a multiple of the alignment boundary to satisfy the requirements of aligned allocation functions.
 
 ## Default Alignment
 
