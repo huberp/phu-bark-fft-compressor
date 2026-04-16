@@ -13,6 +13,7 @@ PhuBarkFFTCompressorAudioProcessor::PhuBarkFFTCompressorAudioProcessor()
     releaseParam       = apvts.getRawParameterValue(PARAM_RELEASE);
     contourParam       = apvts.getRawParameterValue(PARAM_CONTOUR);
     fftModeParam       = apvts.getRawParameterValue(PARAM_FFT_MODE);
+    overlapModeParam   = apvts.getRawParameterValue(PARAM_OVERLAP_MODE);
     tsAttackParam      = apvts.getRawParameterValue(PARAM_TS_ATTACK);
     tsSustainParam     = apvts.getRawParameterValue(PARAM_TS_SUSTAIN);
     tsSensitivityParam = apvts.getRawParameterValue(PARAM_TS_SENSITIVITY);
@@ -72,6 +73,13 @@ PhuBarkFFTCompressorAudioProcessor::createParameterLayout() {
         juce::StringArray{"Precision", "Transient"},
         0)); // Default: Precision
 
+    // ── Overlap Mode ─────────────────────────────────────────────────────
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{PARAM_OVERLAP_MODE, 1},
+        "Overlap",
+        juce::StringArray{"50% (Low CPU)", "75% (High Quality)"},
+        0)); // Default: 50%
+
     // ── Transient Shaper ─────────────────────────────────────────────────
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{PARAM_TS_ATTACK, 1},
@@ -116,6 +124,11 @@ void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int /*
     lastFFTModeIndex = fftModeIndex;
     m_compressor.setFFTMode(fftModeIndex == 0 ? BarkFFTCompressor::FFTMode::Precision
                                               : BarkFFTCompressor::FFTMode::Transient);
+
+    const int overlapModeIndex = static_cast<int>(overlapModeParam->load());
+    lastOverlapModeIndex = overlapModeIndex;
+    m_compressor.setOverlapMode(overlapModeIndex == 0 ? BarkFFTCompressor::OverlapMode::Half
+                                                      : BarkFFTCompressor::OverlapMode::ThreeQuarter);
 
     m_compressor.prepare(sampleRate);
 
@@ -170,6 +183,16 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         lastFFTModeIndex = fftModeIndex;
         m_compressor.setFFTMode(fftModeIndex == 0 ? BarkFFTCompressor::FFTMode::Precision
                                                   : BarkFFTCompressor::FFTMode::Transient);
+        m_compressor.prepare(getSampleRate());
+        setLatencySamples(m_compressor.getLatencySamples());
+    }
+
+    // ── Overlap mode change detection ─────────────────────────────────────
+    const int overlapModeIndex = static_cast<int>(overlapModeParam->load());
+    if (overlapModeIndex != lastOverlapModeIndex) {
+        lastOverlapModeIndex = overlapModeIndex;
+        m_compressor.setOverlapMode(overlapModeIndex == 0 ? BarkFFTCompressor::OverlapMode::Half
+                                                          : BarkFFTCompressor::OverlapMode::ThreeQuarter);
         m_compressor.prepare(getSampleRate());
         setLatencySamples(m_compressor.getLatencySamples());
     }

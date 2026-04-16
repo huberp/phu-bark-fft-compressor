@@ -67,6 +67,10 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     juce::Label fftModeLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> fftModeAttachment;
 
+    juce::ComboBox overlapCombo;
+    juce::Label overlapLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> overlapAttachment;
+
     juce::Slider smoothingSlider;
     juce::Label smoothingLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> smoothingAttachment;

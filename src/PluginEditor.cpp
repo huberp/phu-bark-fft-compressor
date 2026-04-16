@@ -244,6 +244,22 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_FFT_MODE,
         fftModeCombo);
 
+    // Overlap mode combo box
+    overlapLabel.setText("Overlap", juce::dontSendNotification);
+    overlapLabel.setJustificationType(juce::Justification::centredLeft);
+    overlapLabel.setTooltip("Select between 50% overlap (lower CPU) or "
+                            "75% overlap (higher quality, 2x CPU cost).");
+    addAndMakeVisible(overlapLabel);
+
+    overlapCombo.addItem("50% (Low CPU)", 1);
+    overlapCombo.addItem("75% (High Quality)", 2);
+    overlapCombo.setTooltip("Select between 50% overlap (lower CPU) or "
+                            "75% overlap (higher quality, 2x CPU cost).");
+    addAndMakeVisible(overlapCombo);
+    overlapAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_OVERLAP_MODE,
+        overlapCombo);
+
     // Smoothing slider
     smoothingLabel.setText("Smoothing Taps", juce::dontSendNotification);
     smoothingLabel.setJustificationType(juce::Justification::centredLeft);
@@ -368,7 +384,7 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
     startTimerHz(60);
 
     // Set editor size
-    setSize(700, 868);
+    setSize(700, 896);
 }
 
 PhuBarkFFTCompressorAudioProcessorEditor::~PhuBarkFFTCompressorAudioProcessorEditor() {
@@ -411,9 +427,9 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
         return 2 * kGroupPaddingV + numRows * kRowHeight + (numRows - 1) * kRowGap;
     };
 
-    // ── Compressor controls group (8 rows) ──────────────────────────────
+    // ── Compressor controls group (9 rows) ─────────────────────────────────
 
-    auto compGroupArea = area.removeFromTop(groupHeight(8));
+    auto compGroupArea = area.removeFromTop(groupHeight(9));
     compressorGroup.setBounds(compGroupArea);
     auto compContent = compGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
 
@@ -451,6 +467,13 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
     row = compContent.removeFromTop(kRowHeight);
     fftModeLabel.setBounds(row.removeFromLeft(kLabelWidth));
     fftModeCombo.setBounds(row);
+
+    compContent.removeFromTop(kRowGap);
+
+    // Overlap Mode row
+    row = compContent.removeFromTop(kRowHeight);
+    overlapLabel.setBounds(row.removeFromLeft(kLabelWidth));
+    overlapCombo.setBounds(row);
 
     compContent.removeFromTop(kRowGap);
 
