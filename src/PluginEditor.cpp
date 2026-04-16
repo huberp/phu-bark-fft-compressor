@@ -260,16 +260,6 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_SMOOTHING,
         smoothingSlider);
 
-    // Phase Vocoding toggle
-    phaseVocodingToggle.setButtonText("Phase Vocoding");
-    phaseVocodingToggle.setTooltip("Enables phase vocoding to reduce phase artifacts and improve "
-                                   "transient response. Increases CPU usage slightly.");
-    addAndMakeVisible(phaseVocodingToggle);
-    phaseVocodingAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.getAPVTS(),
-        PhuBarkFFTCompressorAudioProcessor::PARAM_PHASE_VOCODING_ENABLE,
-        phaseVocodingToggle);
-
     // ── Transient Shaper group ──────────────────────────────────────────
 
     transientShaperGroup.setText("Transient Shaper");
@@ -468,12 +458,6 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
     row = compContent.removeFromTop(kRowHeight);
     smoothingLabel.setBounds(row.removeFromLeft(kLabelWidth));
     smoothingSlider.setBounds(row);
-
-    compContent.removeFromTop(kRowGap);
-
-    // Phase Vocoding toggle row
-    row = compContent.removeFromTop(kRowHeight);
-    phaseVocodingToggle.setBounds(row);
 
     area.removeFromTop(kGroupSpacing);
 

@@ -18,7 +18,6 @@ PhuBarkFFTCompressorAudioProcessor::PhuBarkFFTCompressorAudioProcessor()
     tsSensitivityParam = apvts.getRawParameterValue(PARAM_TS_SENSITIVITY);
     tsBypassParam      = apvts.getRawParameterValue(PARAM_TS_BYPASS);
     smoothingParam     = apvts.getRawParameterValue(PARAM_SMOOTHING);
-    phaseVocodingParam = apvts.getRawParameterValue(PARAM_PHASE_VOCODING_ENABLE);
 }
 
 PhuBarkFFTCompressorAudioProcessor::~PhuBarkFFTCompressorAudioProcessor() = default;
@@ -108,12 +107,6 @@ PhuBarkFFTCompressorAudioProcessor::createParameterLayout() {
         0.3f,
         juce::AudioParameterFloatAttributes().withLabel("")));
 
-    // ── Phase Vocoding ────────────────────────────────────────────────────
-    params.push_back(std::make_unique<juce::AudioParameterBool>(
-        juce::ParameterID{PARAM_PHASE_VOCODING_ENABLE, 1},
-        "Phase Vocoding",
-        false)); // Default: disabled
-
     return {params.begin(), params.end()};
 }
 
@@ -123,11 +116,6 @@ void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int /*
     lastFFTModeIndex = fftModeIndex;
     m_compressor.setFFTMode(fftModeIndex == 0 ? BarkFFTCompressor::FFTMode::Precision
                                               : BarkFFTCompressor::FFTMode::Transient);
-
-    // Apply phase vocoding state before prepare so buffers are allocated correctly
-    const bool phaseVocoding = phaseVocodingParam->load() >= 0.5f;
-    lastPhaseVocodingEnabled = phaseVocoding;
-    m_compressor.setPhaseVocodingEnabled(phaseVocoding);
 
     m_compressor.prepare(sampleRate);
 
@@ -182,17 +170,6 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         lastFFTModeIndex = fftModeIndex;
         m_compressor.setFFTMode(fftModeIndex == 0 ? BarkFFTCompressor::FFTMode::Precision
                                                   : BarkFFTCompressor::FFTMode::Transient);
-        m_compressor.prepare(getSampleRate());
-        setLatencySamples(m_compressor.getLatencySamples());
-    }
-
-    // ── Phase vocoding toggle change detection ────────────────────────────
-    // If the user toggled phase vocoding, re-initialise to allocate / free
-    // the phase buffers. Same pattern as FFT mode change above.
-    const bool newPhaseVocoding = phaseVocodingParam->load() >= 0.5f;
-    if (newPhaseVocoding != lastPhaseVocodingEnabled) {
-        lastPhaseVocodingEnabled = newPhaseVocoding;
-        m_compressor.setPhaseVocodingEnabled(newPhaseVocoding);
         m_compressor.prepare(getSampleRate());
         setLatencySamples(m_compressor.getLatencySamples());
     }

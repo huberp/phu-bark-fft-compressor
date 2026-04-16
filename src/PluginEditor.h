@@ -71,9 +71,6 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     juce::Label smoothingLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> smoothingAttachment;
 
-    juce::ToggleButton phaseVocodingToggle;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> phaseVocodingAttachment;
-
     // ── Transient Shaper controls ────────────────────────────────────────
     juce::GroupComponent transientShaperGroup;
 
