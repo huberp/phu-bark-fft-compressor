@@ -31,6 +31,11 @@ class BarkFFTCompressor {
     // Transient uses a smaller FFT (better transient response).
     enum class FFTMode { Precision, Transient };
 
+    // Overlap mode: controls the hop size as a fraction of the FFT window.
+    //   Half          → hop = N/2 (50% overlap, lower CPU)
+    //   ThreeQuarter  → hop = N/4 (75% overlap, higher quality, 2× CPU)
+    enum class OverlapMode { Half, ThreeQuarter };
+
     // Equal-loudness contour presets
     enum class ContourPreset {
         ISO226_20Phon = 0,
@@ -51,6 +56,10 @@ class BarkFFTCompressor {
     /** Set the FFT mode. Call before or after prepare(); effective on next prepare(). */
     void setFFTMode(FFTMode mode) { currentFFTMode = mode; }
     FFTMode getFFTMode() const { return currentFFTMode; }
+
+    /** Set the overlap mode. Call before prepare(); effective on next prepare(). */
+    void setOverlapMode(OverlapMode mode) { currentOverlapMode = mode; }
+    OverlapMode getOverlapMode() const { return currentOverlapMode; }
 
     /**
      * Compute the FFT size for a given mode and sample rate.
@@ -81,7 +90,13 @@ class BarkFFTCompressor {
         // Count trailing shifts to find log2(currentFFTSize), e.g. 2048→11, 4096→12.
         { int sz = currentFFTSize; while (sz > 1) { ++currentFFTOrder; sz >>= 1; } }
         currentNumBins  = currentFFTSize / 2;
-        currentHopSize  = currentFFTSize / 2; // 50% overlap
+        // Hop size depends on overlap mode:
+        //   Half (50%):         hop = N/2, COLA sum = 1.0 → scale = 1.0
+        //   ThreeQuarter (75%): hop = N/4, COLA sum = 2.0 → scale = 0.5
+        currentHopSize = (currentOverlapMode == OverlapMode::ThreeQuarter)
+                       ? currentFFTSize / 4
+                       : currentFFTSize / 2;
+        olaScaleFactor = (currentOverlapMode == OverlapMode::ThreeQuarter) ? 0.5f : 1.0f;
 
         // Normalise raw FFT power to dBFS (depends on FFT size so must be updated here).
         // JUCE's forward transform is unnormalized: for a 0-dBFS sine with a Hann window of
@@ -124,10 +139,11 @@ class BarkFFTCompressor {
         jassert (reinterpret_cast<uintptr_t>(fftBufferR.data())    % 32 == 0);
 
         // Pre-compute periodic Hann window (denominator = FFT_SIZE, not FFT_SIZE-1).
-        // The periodic form satisfies the COLA condition at 50% overlap:
-        //   w[n] + w[n + N/2] = 1  for all n
-        // which is required for perfect reconstruction when the window is applied
-        // only at the analysis stage (no synthesis window).
+        // The periodic form satisfies the COLA condition:
+        //   At 50% overlap (hop=N/2): Σ w[n + m·N/2] = 1.0  → olaScaleFactor = 1.0
+        //   At 75% overlap (hop=N/4): Σ w[n + m·N/4] = 2.0  → olaScaleFactor = 0.5
+        // Perfect reconstruction is achieved by scaling the OLA accumulation
+        // by olaScaleFactor. No synthesis window is applied.
         for (int i = 0; i < currentFFTSize; ++i) {
             hannWindow[i] = 0.5f * (1.0f - std::cos(2.0f * kPi * static_cast<float>(i)
                                                      / static_cast<float>(currentFFTSize)));
@@ -663,14 +679,10 @@ class BarkFFTCompressor {
         // For each channel: window + FFT -> apply same per-band gains -> IFFT -> OLA.
         //
         // The Hann window is applied ONLY at the analysis stage (before FFT).
-        // No synthesis window is applied. With a periodic Hann at 50% overlap:
-        //   sum_m w[n - m*H] = 1  (COLA property)
-        // so the raw OLA sum of IFFT frames already equals the input at unity gain.
-        // No scale factor and no synthesis window are needed.
-        //
-        // Applying a second window at synthesis (hann*hann) breaks this:
-        //   hann^2[n] + hann^2[n+N/2] = 0.25*(3 + cos(4*pi*n/N)) -- NOT constant --
-        // which produces amplitude modulation at ~sampleRate/HOP_SIZE Hz (~43 Hz at 44.1 kHz).
+        // No synthesis window is applied. The periodic Hann COLA sum is:
+        //   50% overlap (hop=N/2): sum = 1.0 → olaScaleFactor = 1.0
+        //   75% overlap (hop=N/4): sum = 2.0 → olaScaleFactor = 0.5
+        // The olaScaleFactor compensates for the non-unity COLA sum at higher overlap.
 
         auto synthesiseChannel = [&](const phu::memory::AlignedVector<float>& inRing,
                                      phu::memory::AlignedVector<float>& outRing,
@@ -692,10 +704,11 @@ class BarkFFTCompressor {
 
             fft->performRealOnlyInverseTransform(buf.data());
 
-            // OLA: accumulate raw IFFT output -- no synthesis window, no scale factor.
+            // OLA: accumulate IFFT output scaled by olaScaleFactor for COLA normalisation.
+            const float scale = olaScaleFactor;
             for (int i = 0; i < currentFFTSize; ++i) {
                 int outIdx = (ringWritePos - currentFFTSize + i + ringSize) % ringSize;
-                outRing[outIdx] += buf[i];
+                outRing[outIdx] += buf[i] * scale;
             }
         };
 
@@ -710,10 +723,12 @@ class BarkFFTCompressor {
     // ── Runtime FFT parameters (set in prepare()) ────────────────────────
 
     FFTMode currentFFTMode = FFTMode::Precision;
+    OverlapMode currentOverlapMode = OverlapMode::Half;
     int currentFFTOrder    = 11;
     int currentFFTSize     = 2048;
     int currentNumBins     = 1024;
     int currentHopSize     = 1024;
+    float olaScaleFactor   = 1.0f;  // COLA normalisation: 1.0 at 50%, 0.5 at 75%
     float kFFTNormDb       = 54.2f; // 20*log10(2048/4), updated in prepare()
 
     // ── Parameters ───────────────────────────────────────────────────────

@@ -56,6 +56,7 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     static constexpr const char* PARAM_RELEASE      = "release_ms";
     static constexpr const char* PARAM_CONTOUR      = "contour_preset";
     static constexpr const char* PARAM_FFT_MODE     = "fft_mode";
+    static constexpr const char* PARAM_OVERLAP_MODE  = "overlap_mode";
     static constexpr const char* PARAM_TS_ATTACK    = "ts_attack_db";
     static constexpr const char* PARAM_TS_SUSTAIN   = "ts_sustain_db";
     static constexpr const char* PARAM_TS_SENSITIVITY = "ts_sensitivity";
@@ -79,6 +80,7 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     std::atomic<float>* releaseParam      = nullptr;
     std::atomic<float>* contourParam      = nullptr;
     std::atomic<float>* fftModeParam      = nullptr;
+    std::atomic<float>* overlapModeParam   = nullptr;
     std::atomic<float>* tsAttackParam     = nullptr;
     std::atomic<float>* tsSustainParam    = nullptr;
     std::atomic<float>* tsSensitivityParam = nullptr;
@@ -87,6 +89,9 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
 
     // Tracks the last applied FFT mode to detect changes in processBlock
     int lastFFTModeIndex = 0;
+
+    // Tracks the last phase vocoding state to detect changes in processBlock
+    bool lastPhaseVocodingEnabled = false;
 
     // Core DSP
     BarkFFTCompressor m_compressor;

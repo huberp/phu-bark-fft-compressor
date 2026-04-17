@@ -5,7 +5,8 @@
 // GainReductionPanel
 // ============================================================================
 
-void PhuBarkFFTCompressorAudioProcessorEditor::GainReductionPanel::paint(juce::Graphics& g) {
+template <typename SampleType>
+void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::GainReductionPanel::paint(juce::Graphics& g) {
     auto fullBounds = getLocalBounds();
 
     // Background
@@ -14,7 +15,7 @@ void PhuBarkFFTCompressorAudioProcessorEditor::GainReductionPanel::paint(juce::G
 
     // Title
     g.setColour(juce::Colours::white.withAlpha(0.6f));
-    g.setFont(juce::Font(10.0f));
+    g.setFont(juce::Font(juce::FontOptions(10.0f)));
     auto titleArea = fullBounds.removeFromTop(14);
     g.drawText("Gain Reduction (dB)", titleArea, juce::Justification::centred);
 
@@ -30,8 +31,8 @@ void PhuBarkFFTCompressorAudioProcessorEditor::GainReductionPanel::paint(juce::G
     const float by       = static_cast<float>(bounds.getY());
 
     // Log-frequency mapping matching SpectrumDisplay (20 Hz – 20 kHz)
-    const float kMinFreq = SpectrumDisplay::MIN_FREQ;
-    const float kMaxFreq = SpectrumDisplay::MAX_FREQ;
+    const float kMinFreq = SpectrumDisplay<SampleType>::MIN_FREQ;
+    const float kMaxFreq = SpectrumDisplay<SampleType>::MAX_FREQ;
     const float logMin   = std::log10(kMinFreq);
     const float logMax   = std::log10(kMaxFreq);
     auto freqToX = [&](float freq) -> float {
@@ -54,7 +55,7 @@ void PhuBarkFFTCompressorAudioProcessorEditor::GainReductionPanel::paint(juce::G
         float normalized = std::min(std::abs(gr) / maxGR, 1.0f);
         float barHeight  = normalized * bh;
 
-        juce::Colour barColour = SpectrumDisplay::getBandColour(band);
+        juce::Colour barColour = SpectrumDisplay<SampleType>::getBandColour(band);
 
         if (barHeight > 0.5f) {
             g.setColour(barColour.withAlpha(0.7f));
@@ -64,7 +65,7 @@ void PhuBarkFFTCompressorAudioProcessorEditor::GainReductionPanel::paint(juce::G
         // Band number label at bottom, centred in the bar
         float centerX = (xLeft + xRight) * 0.5f;
         g.setColour(juce::Colours::white.withAlpha(0.3f));
-        g.setFont(juce::Font(8.0f));
+        g.setFont(juce::Font(juce::FontOptions(8.0f)));
         g.drawText(juce::String(band + 1),
                    static_cast<int>(centerX) - 8, bounds.getBottom() - 10,
                    16, 10, juce::Justification::centred);
@@ -72,7 +73,7 @@ void PhuBarkFFTCompressorAudioProcessorEditor::GainReductionPanel::paint(juce::G
 
     // Scale labels
     g.setColour(juce::Colours::white.withAlpha(0.3f));
-    g.setFont(juce::Font(9.0f));
+    g.setFont(juce::Font(juce::FontOptions(9.0f)));
     g.drawText("0", bounds.getX() - 18, bounds.getY() - 4, 16, 12,
                juce::Justification::centredRight);
     g.drawText(juce::String(static_cast<int>(-maxGR)),
@@ -129,7 +130,8 @@ void PhuBarkFFTCompressorAudioProcessorEditor::GainReductionPanel::paint(juce::G
 // Editor Construction
 // ============================================================================
 
-PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEditor(
+template <typename SampleType>
+PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioProcessorEditor(
     PhuBarkFFTCompressorAudioProcessor& p)
     : AudioProcessorEditor(&p), audioProcessor(p) {
     // Set up spectrum display
@@ -243,6 +245,22 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
     fftModeAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_FFT_MODE,
         fftModeCombo);
+
+    // Overlap mode combo box
+    overlapLabel.setText("Overlap", juce::dontSendNotification);
+    overlapLabel.setJustificationType(juce::Justification::centredLeft);
+    overlapLabel.setTooltip("Select between 50% overlap (lower CPU) or "
+                            "75% overlap (higher quality, 2x CPU cost).");
+    addAndMakeVisible(overlapLabel);
+
+    overlapCombo.addItem("50% (Low CPU)", 1);
+    overlapCombo.addItem("75% (High Quality)", 2);
+    overlapCombo.setTooltip("Select between 50% overlap (lower CPU) or "
+                            "75% overlap (higher quality, 2x CPU cost).");
+    addAndMakeVisible(overlapCombo);
+    overlapAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_OVERLAP_MODE,
+        overlapCombo);
 
     // Smoothing slider
     smoothingLabel.setText("Smoothing Taps", juce::dontSendNotification);
@@ -368,10 +386,11 @@ PhuBarkFFTCompressorAudioProcessorEditor::PhuBarkFFTCompressorAudioProcessorEdit
     startTimerHz(60);
 
     // Set editor size
-    setSize(700, 868);
+    setSize(700, 896);
 }
 
-PhuBarkFFTCompressorAudioProcessorEditor::~PhuBarkFFTCompressorAudioProcessorEditor() {
+template <typename SampleType>
+PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::~PhuBarkFFTCompressorAudioProcessorEditor() {
     stopTimer();
 }
 
@@ -379,7 +398,8 @@ PhuBarkFFTCompressorAudioProcessorEditor::~PhuBarkFFTCompressorAudioProcessorEdi
 // Paint
 // ============================================================================
 
-void PhuBarkFFTCompressorAudioProcessorEditor::paint(juce::Graphics& g) {
+template <typename SampleType>
+void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::paint(juce::Graphics& g) {
     g.fillAll(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
 }
 
@@ -387,7 +407,8 @@ void PhuBarkFFTCompressorAudioProcessorEditor::paint(juce::Graphics& g) {
 // Layout
 // ============================================================================
 
-void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
+template <typename SampleType>
+void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::resized() {
     auto area = getLocalBounds().reduced(10);
 
     // Spectrum display (top section)
@@ -411,9 +432,9 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
         return 2 * kGroupPaddingV + numRows * kRowHeight + (numRows - 1) * kRowGap;
     };
 
-    // ── Compressor controls group (8 rows) ──────────────────────────────
+    // ── Compressor controls group (9 rows) ─────────────────────────────────
 
-    auto compGroupArea = area.removeFromTop(groupHeight(8));
+    auto compGroupArea = area.removeFromTop(groupHeight(9));
     compressorGroup.setBounds(compGroupArea);
     auto compContent = compGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
 
@@ -451,6 +472,13 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
     row = compContent.removeFromTop(kRowHeight);
     fftModeLabel.setBounds(row.removeFromLeft(kLabelWidth));
     fftModeCombo.setBounds(row);
+
+    compContent.removeFromTop(kRowGap);
+
+    // Overlap Mode row
+    row = compContent.removeFromTop(kRowHeight);
+    overlapLabel.setBounds(row.removeFromLeft(kLabelWidth));
+    overlapCombo.setBounds(row);
 
     compContent.removeFromTop(kRowGap);
 
@@ -523,7 +551,8 @@ void PhuBarkFFTCompressorAudioProcessorEditor::resized() {
 // Timer: update FFT display at 60 Hz
 // ============================================================================
 
-void PhuBarkFFTCompressorAudioProcessorEditor::timerCallback() {
+template <typename SampleType>
+void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::timerCallback() {
     // Update sample rate if changed
     double sr = audioProcessor.getSampleRate();
     if (sr > 0.0)
@@ -539,3 +568,5 @@ void PhuBarkFFTCompressorAudioProcessorEditor::timerCallback() {
     spectrumDisplay.repaint();
     gainReductionPanel.repaint();
 }
+
+template class PhuBarkFFTCompressorAudioProcessorEditor<float>;
