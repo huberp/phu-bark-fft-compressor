@@ -247,7 +247,7 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
 }
 
 juce::AudioProcessorEditor* PhuBarkFFTCompressorAudioProcessor::createEditor() {
-    return new PhuBarkFFTCompressorAudioProcessorEditor(*this);
+    return new PhuBarkFFTCompressorAudioProcessorEditor<float>(*this);
 }
 
 bool PhuBarkFFTCompressorAudioProcessor::hasEditor() const { return true; }

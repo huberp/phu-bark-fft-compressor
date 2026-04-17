@@ -20,7 +20,7 @@ namespace audio {
  *
  * Template parameter NumChannels: number of interleaved channels (typically 2 for stereo).
  */
-template <int NumChannels>
+template <int NumChannels, typename SampleType = float>
 class AudioSampleFifo {
   public:
     /** Ring buffer capacity per channel. Must be power-of-two for efficient wrapping.
@@ -29,7 +29,7 @@ class AudioSampleFifo {
 
     AudioSampleFifo() : fifo(kFifoSize) {
         for (auto& ch : buffer)
-            std::memset(ch.data(), 0, sizeof(float) * kFifoSize);
+            std::memset(ch.data(), 0, sizeof(SampleType) * kFifoSize);
     }
 
     /**
@@ -116,7 +116,7 @@ class AudioSampleFifo {
 
   private:
     juce::AbstractFifo fifo;
-    std::array<std::array<float, kFifoSize>, NumChannels> buffer;
+    alignas(32) std::array<std::array<float, kFifoSize>, NumChannels> buffer;
 };
 
 } // namespace audio

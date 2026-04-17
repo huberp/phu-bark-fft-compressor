@@ -13,6 +13,7 @@ using phu::audio::FFTProcessor;
  *
  * Rendered on the UI thread at 60 Hz.
  */
+template <typename SampleType = float>
 class SpectrumDisplay : public juce::Component {
   public:
     static constexpr float MIN_FREQ = 20.0f;
@@ -28,7 +29,7 @@ class SpectrumDisplay : public juce::Component {
     void paint(juce::Graphics& g) override;
 
     /** Set references to the FFT processors and compressor for drawing. */
-    void setProcessors(FFTProcessor* inputFFT, FFTProcessor* outputFFT,
+    void setProcessors(FFTProcessor<SampleType>* inputFFT, FFTProcessor<SampleType>* outputFFT,
                        const BarkFFTCompressor* compressor);
 
     /** Set the sample rate for frequency axis calculations. */
@@ -55,13 +56,13 @@ class SpectrumDisplay : public juce::Component {
     // Drawing helpers
     void drawBackground(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawSpectrum(juce::Graphics& g, juce::Rectangle<int> bounds,
-                      FFTProcessor* fftProc, juce::Colour colour, float lineWidth);
+                      FFTProcessor<SampleType>* fftProc, juce::Colour colour, float lineWidth);
     void drawBarkBands(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawContour(juce::Graphics& g, juce::Rectangle<int> bounds);
     void drawBarkEnergy(juce::Graphics& g, juce::Rectangle<int> bounds);
 
-    FFTProcessor* inputFFTProcessor = nullptr;
-    FFTProcessor* outputFFTProcessor = nullptr;
+    FFTProcessor<SampleType>* inputFFTProcessor = nullptr;
+    FFTProcessor<SampleType>* outputFFTProcessor = nullptr;
     const BarkFFTCompressor* compressorRef = nullptr;
 
     float sampleRate = 48000.0f;
