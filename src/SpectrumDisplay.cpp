@@ -1,7 +1,7 @@
 ﻿#include "SpectrumDisplay.h"
 
 // ============================================================================
-// Band colours â€” 24 colours cycling through a distinct palette
+// Band colours - 24 colours cycling through a distinct palette
 // ============================================================================
 
 static const juce::Colour kBandColours[BarkFFTCompressor::NUM_BARK_BANDS] = {

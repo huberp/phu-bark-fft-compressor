@@ -90,8 +90,8 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     // Tracks the last applied FFT mode to detect changes in processBlock
     int lastFFTModeIndex = 0;
 
-    // Tracks the last phase vocoding state to detect changes in processBlock
-    bool lastPhaseVocodingEnabled = false;
+    // Tracks the last applied overlap mode to detect changes in processBlock
+    int lastOverlapModeIndex = 0;
 
     // Core DSP
     BarkFFTCompressor m_compressor;
