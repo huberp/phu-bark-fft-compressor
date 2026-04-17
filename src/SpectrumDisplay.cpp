@@ -1,10 +1,10 @@
-#include "SpectrumDisplay.h"
+﻿#include "SpectrumDisplay.h"
 
 // ============================================================================
-// Band colours — 24 colours cycling through a distinct palette
+// Band colours â€” 24 colours cycling through a distinct palette
 // ============================================================================
 
-static const juce::Colour kBandColours[SpectrumDisplay::NUM_BARK_BANDS] = {
+static const juce::Colour kBandColours[BarkFFTCompressor::NUM_BARK_BANDS] = {
     juce::Colour(0xFF8B0000u), // 0: dark red
     juce::Colour(0xFFCC3300u), // 1: red-orange
     juce::Colour(0xFFCC5500u), // 2: burnt orange
@@ -35,7 +35,8 @@ static const juce::Colour kBandColours[SpectrumDisplay::NUM_BARK_BANDS] = {
 // Construction
 // ============================================================================
 
-SpectrumDisplay::SpectrumDisplay() {
+template <typename SampleType>
+SpectrumDisplay<SampleType>::SpectrumDisplay() {
     setOpaque(true);
 }
 
@@ -43,14 +44,16 @@ SpectrumDisplay::SpectrumDisplay() {
 // Configuration
 // ============================================================================
 
-void SpectrumDisplay::setProcessors(FFTProcessor* inputFFT, FFTProcessor* outputFFT,
+template <typename SampleType>
+void SpectrumDisplay<SampleType>::setProcessors(FFTProcessor<SampleType>* inputFFT, FFTProcessor<SampleType>* outputFFT,
                                      const BarkFFTCompressor* compressor) {
     inputFFTProcessor = inputFFT;
     outputFFTProcessor = outputFFT;
     compressorRef = compressor;
 }
 
-juce::Colour SpectrumDisplay::getBandColour(int band) {
+template <typename SampleType>
+juce::Colour SpectrumDisplay<SampleType>::getBandColour(int band) {
     if (band >= 0 && band < NUM_BARK_BANDS)
         return kBandColours[band];
     return juce::Colours::grey;
@@ -60,7 +63,8 @@ juce::Colour SpectrumDisplay::getBandColour(int band) {
 // Coordinate conversion
 // ============================================================================
 
-float SpectrumDisplay::freqToX(float freq, float width) const {
+template <typename SampleType>
+float SpectrumDisplay<SampleType>::freqToX(float freq, float width) const {
     if (freq <= 0.0f) return 0.0f;
     float logMin = std::log10(MIN_FREQ);
     float logMax = std::log10(MAX_FREQ);
@@ -68,7 +72,8 @@ float SpectrumDisplay::freqToX(float freq, float width) const {
     return ((logFreq - logMin) / (logMax - logMin)) * width;
 }
 
-float SpectrumDisplay::dbToY(float db, float height) const {
+template <typename SampleType>
+float SpectrumDisplay<SampleType>::dbToY(float db, float height) const {
     float normalized = (db - MIN_DB) / (MAX_DB - MIN_DB);
     normalized = std::max(0.0f, std::min(1.0f, normalized));
     return height * (1.0f - normalized);
@@ -78,7 +83,8 @@ float SpectrumDisplay::dbToY(float db, float height) const {
 // Paint
 // ============================================================================
 
-void SpectrumDisplay::paint(juce::Graphics& g) {
+template <typename SampleType>
+void SpectrumDisplay<SampleType>::paint(juce::Graphics& g) {
     auto bounds = getLocalBounds();
 
     drawBackground(g, bounds);
@@ -101,7 +107,8 @@ void SpectrumDisplay::paint(juce::Graphics& g) {
 // Drawing: background with grid
 // ============================================================================
 
-void SpectrumDisplay::drawBackground(juce::Graphics& g, juce::Rectangle<int> bounds) {
+template <typename SampleType>
+void SpectrumDisplay<SampleType>::drawBackground(juce::Graphics& g, juce::Rectangle<int> bounds) {
     g.setColour(juce::Colour(0xFF1A1A2Eu));
     g.fillRect(bounds);
 
@@ -119,7 +126,7 @@ void SpectrumDisplay::drawBackground(juce::Graphics& g, juce::Rectangle<int> bou
 
     // Frequency labels
     g.setColour(juce::Colours::white.withAlpha(0.4f));
-    g.setFont(juce::Font(10.0f));
+    g.setFont(juce::Font(juce::FontOptions(10.0f)));
     static const char* gridLabels[] = {"50", "100", "200", "500", "1k", "2k", "5k", "10k"};
     for (int i = 0; i < 8; ++i) {
         float x = freqToX(gridFreqs[i], w) + static_cast<float>(bounds.getX());
@@ -149,8 +156,9 @@ void SpectrumDisplay::drawBackground(juce::Graphics& g, juce::Rectangle<int> bou
 // Drawing: FFT spectrum line
 // ============================================================================
 
-void SpectrumDisplay::drawSpectrum(juce::Graphics& g, juce::Rectangle<int> bounds,
-                                    FFTProcessor* fftProc, juce::Colour colour, float lineWidth) {
+template <typename SampleType>
+void SpectrumDisplay<SampleType>::drawSpectrum(juce::Graphics& g, juce::Rectangle<int> bounds,
+                                    FFTProcessor<SampleType>* fftProc, juce::Colour colour, float lineWidth) {
     if (!fftProc) return;
 
     const float* magnitudes = fftProc->getMagnitudeSpectrum();
@@ -194,7 +202,8 @@ void SpectrumDisplay::drawSpectrum(juce::Graphics& g, juce::Rectangle<int> bound
 // Drawing: Bark band overlays (vertical shading)
 // ============================================================================
 
-void SpectrumDisplay::drawBarkBands(juce::Graphics& g, juce::Rectangle<int> bounds) {
+template <typename SampleType>
+void SpectrumDisplay<SampleType>::drawBarkBands(juce::Graphics& g, juce::Rectangle<int> bounds) {
     if (!compressorRef) return;
 
     auto w = static_cast<float>(bounds.getWidth());
@@ -228,7 +237,8 @@ void SpectrumDisplay::drawBarkBands(juce::Graphics& g, juce::Rectangle<int> boun
 // Drawing: equal-loudness contour
 // ============================================================================
 
-void SpectrumDisplay::drawContour(juce::Graphics& g, juce::Rectangle<int> bounds) {
+template <typename SampleType>
+void SpectrumDisplay<SampleType>::drawContour(juce::Graphics& g, juce::Rectangle<int> bounds) {
     if (!compressorRef) return;
 
     auto w = static_cast<float>(bounds.getWidth());
@@ -273,7 +283,8 @@ void SpectrumDisplay::drawContour(juce::Graphics& g, juce::Rectangle<int> bounds
 // Drawing: Bark-band energy bars
 // ============================================================================
 
-void SpectrumDisplay::drawBarkEnergy(juce::Graphics& g, juce::Rectangle<int> bounds) {
+template <typename SampleType>
+void SpectrumDisplay<SampleType>::drawBarkEnergy(juce::Graphics& g, juce::Rectangle<int> bounds) {
     if (!compressorRef) return;
 
     auto w = static_cast<float>(bounds.getWidth());
@@ -303,3 +314,6 @@ void SpectrumDisplay::drawBarkEnergy(juce::Graphics& g, juce::Rectangle<int> bou
         }
     }
 }
+
+// Explicit instantiation for the default float specialisation.
+template class SpectrumDisplay<float>;

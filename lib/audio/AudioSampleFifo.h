@@ -20,32 +20,29 @@ namespace audio {
  *
  * Template parameter NumChannels: number of interleaved channels (typically 2 for stereo).
  */
-template <int NumChannels>
+template <int NumChannels, typename SampleType = float>
 class AudioSampleFifo {
   public:
     /** Ring buffer capacity per channel. Must be power-of-two for efficient wrapping.
      *  32768 samples = ~0.7s at 48kHz, 2x the max FFT size of 16384. */
     static constexpr int kFifoSize = 32768;
 
-    AudioSampleFifo() : fifo(kFifoSize) {
-        for (auto& ch : buffer)
-            std::memset(ch.data(), 0, sizeof(float) * kFifoSize);
-    }
+    AudioSampleFifo() : fifo(kFifoSize) {}
 
     /**
      * Push samples from the audio thread into the FIFO.
      *
-     * @param channelData  Array of NumChannels float pointers, each pointing to numSamples floats.
+     * @param channelData  Array of NumChannels SampleType pointers, each pointing to numSamples samples.
      * @param numSamples   Number of samples per channel to push.
      */
-    void push(const float* const* channelData, int numSamples) {
+    void push(const SampleType* const* channelData, int numSamples) {
         const auto scope = fifo.write(numSamples);
 
         if (scope.blockSize1 > 0) {
             for (int ch = 0; ch < NumChannels; ++ch) {
                 std::memcpy(buffer[ch].data() + scope.startIndex1,
                             channelData[ch],
-                            sizeof(float) * static_cast<size_t>(scope.blockSize1));
+                            sizeof(SampleType) * static_cast<size_t>(scope.blockSize1));
             }
         }
 
@@ -53,7 +50,7 @@ class AudioSampleFifo {
             for (int ch = 0; ch < NumChannels; ++ch) {
                 std::memcpy(buffer[ch].data() + scope.startIndex2,
                             channelData[ch] + scope.blockSize1,
-                            sizeof(float) * static_cast<size_t>(scope.blockSize2));
+                            sizeof(SampleType) * static_cast<size_t>(scope.blockSize2));
             }
         }
     }
@@ -63,11 +60,11 @@ class AudioSampleFifo {
      *
      * Discards older samples so we always get the latest data.
      *
-     * @param destination  Array of NumChannels float pointers, each with room for numSamples.
+     * @param destination  Array of NumChannels SampleType pointers, each with room for numSamples.
      * @param numSamples   Number of samples per channel to read.
      * @return             Number of samples actually read.
      */
-    int pull(float* const* destination, int numSamples) {
+    int pull(SampleType* const* destination, int numSamples) {
         const int available = fifo.getNumReady();
 
         if (available <= 0)
@@ -89,7 +86,7 @@ class AudioSampleFifo {
             for (int ch = 0; ch < NumChannels; ++ch) {
                 std::memcpy(destination[ch],
                             buffer[ch].data() + scope.startIndex1,
-                            sizeof(float) * static_cast<size_t>(scope.blockSize1));
+                            sizeof(SampleType) * static_cast<size_t>(scope.blockSize1));
             }
         }
 
@@ -97,7 +94,7 @@ class AudioSampleFifo {
             for (int ch = 0; ch < NumChannels; ++ch) {
                 std::memcpy(destination[ch] + scope.blockSize1,
                             buffer[ch].data() + scope.startIndex2,
-                            sizeof(float) * static_cast<size_t>(scope.blockSize2));
+                            sizeof(SampleType) * static_cast<size_t>(scope.blockSize2));
             }
         }
 
@@ -116,7 +113,7 @@ class AudioSampleFifo {
 
   private:
     juce::AbstractFifo fifo;
-    std::array<std::array<float, kFifoSize>, NumChannels> buffer;
+    std::array<std::array<SampleType, kFifoSize>, NumChannels> buffer;
 };
 
 } // namespace audio

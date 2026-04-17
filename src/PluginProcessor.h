@@ -56,12 +56,12 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     static constexpr const char* PARAM_RELEASE      = "release_ms";
     static constexpr const char* PARAM_CONTOUR      = "contour_preset";
     static constexpr const char* PARAM_FFT_MODE     = "fft_mode";
+    static constexpr const char* PARAM_OVERLAP_MODE  = "overlap_mode";
     static constexpr const char* PARAM_TS_ATTACK    = "ts_attack_db";
     static constexpr const char* PARAM_TS_SUSTAIN   = "ts_sustain_db";
     static constexpr const char* PARAM_TS_SENSITIVITY = "ts_sensitivity";
     static constexpr const char* PARAM_TS_BYPASS    = "ts_bypass";
     static constexpr const char* PARAM_SMOOTHING    = "smoothing";
-    static constexpr const char* PARAM_PHASE_VOCODING_ENABLE = "phase_vocoding_enable";
 
   private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -80,18 +80,16 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     std::atomic<float>* releaseParam      = nullptr;
     std::atomic<float>* contourParam      = nullptr;
     std::atomic<float>* fftModeParam      = nullptr;
+    std::atomic<float>* overlapModeParam   = nullptr;
     std::atomic<float>* tsAttackParam     = nullptr;
     std::atomic<float>* tsSustainParam    = nullptr;
     std::atomic<float>* tsSensitivityParam = nullptr;
     std::atomic<float>* tsBypassParam     = nullptr;
     std::atomic<float>* smoothingParam    = nullptr;
-    std::atomic<float>* phaseVocodingParam = nullptr;
 
     // Tracks the last applied FFT mode to detect changes in processBlock
     int lastFFTModeIndex = 0;
-
-    // Tracks the last phase vocoding state to detect changes in processBlock
-    bool lastPhaseVocodingEnabled = false;
+    int lastOverlapModeIndex = 0;
 
     // Core DSP
     BarkFFTCompressor m_compressor;

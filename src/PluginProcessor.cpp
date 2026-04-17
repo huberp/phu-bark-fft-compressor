@@ -13,12 +13,12 @@ PhuBarkFFTCompressorAudioProcessor::PhuBarkFFTCompressorAudioProcessor()
     releaseParam       = apvts.getRawParameterValue(PARAM_RELEASE);
     contourParam       = apvts.getRawParameterValue(PARAM_CONTOUR);
     fftModeParam       = apvts.getRawParameterValue(PARAM_FFT_MODE);
+    overlapModeParam   = apvts.getRawParameterValue(PARAM_OVERLAP_MODE);
     tsAttackParam      = apvts.getRawParameterValue(PARAM_TS_ATTACK);
     tsSustainParam     = apvts.getRawParameterValue(PARAM_TS_SUSTAIN);
     tsSensitivityParam = apvts.getRawParameterValue(PARAM_TS_SENSITIVITY);
     tsBypassParam      = apvts.getRawParameterValue(PARAM_TS_BYPASS);
     smoothingParam     = apvts.getRawParameterValue(PARAM_SMOOTHING);
-    phaseVocodingParam = apvts.getRawParameterValue(PARAM_PHASE_VOCODING_ENABLE);
 }
 
 PhuBarkFFTCompressorAudioProcessor::~PhuBarkFFTCompressorAudioProcessor() = default;
@@ -73,6 +73,13 @@ PhuBarkFFTCompressorAudioProcessor::createParameterLayout() {
         juce::StringArray{"Precision", "Transient"},
         0)); // Default: Precision
 
+    // ── Overlap Mode ─────────────────────────────────────────────────────
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{PARAM_OVERLAP_MODE, 1},
+        "Overlap",
+        juce::StringArray{"50% (Low CPU)", "75% (High Quality)"},
+        0)); // Default: 50%
+
     // ── Transient Shaper ─────────────────────────────────────────────────
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{PARAM_TS_ATTACK, 1},
@@ -108,12 +115,6 @@ PhuBarkFFTCompressorAudioProcessor::createParameterLayout() {
         0.3f,
         juce::AudioParameterFloatAttributes().withLabel("")));
 
-    // ── Phase Vocoding ────────────────────────────────────────────────────
-    params.push_back(std::make_unique<juce::AudioParameterBool>(
-        juce::ParameterID{PARAM_PHASE_VOCODING_ENABLE, 1},
-        "Phase Vocoding",
-        false)); // Default: disabled
-
     return {params.begin(), params.end()};
 }
 
@@ -124,10 +125,10 @@ void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int /*
     m_compressor.setFFTMode(fftModeIndex == 0 ? BarkFFTCompressor::FFTMode::Precision
                                               : BarkFFTCompressor::FFTMode::Transient);
 
-    // Apply phase vocoding state before prepare so buffers are allocated correctly
-    const bool phaseVocoding = phaseVocodingParam->load() >= 0.5f;
-    lastPhaseVocodingEnabled = phaseVocoding;
-    m_compressor.setPhaseVocodingEnabled(phaseVocoding);
+    const int overlapModeIndex = static_cast<int>(overlapModeParam->load());
+    lastOverlapModeIndex = overlapModeIndex;
+    m_compressor.setOverlapMode(overlapModeIndex == 0 ? BarkFFTCompressor::OverlapMode::Half
+                                                      : BarkFFTCompressor::OverlapMode::ThreeQuarter);
 
     m_compressor.prepare(sampleRate);
 
@@ -186,13 +187,12 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         setLatencySamples(m_compressor.getLatencySamples());
     }
 
-    // ── Phase vocoding toggle change detection ────────────────────────────
-    // If the user toggled phase vocoding, re-initialise to allocate / free
-    // the phase buffers. Same pattern as FFT mode change above.
-    const bool newPhaseVocoding = phaseVocodingParam->load() >= 0.5f;
-    if (newPhaseVocoding != lastPhaseVocodingEnabled) {
-        lastPhaseVocodingEnabled = newPhaseVocoding;
-        m_compressor.setPhaseVocodingEnabled(newPhaseVocoding);
+    // ── Overlap mode change detection ─────────────────────────────────────
+    const int overlapModeIndex = static_cast<int>(overlapModeParam->load());
+    if (overlapModeIndex != lastOverlapModeIndex) {
+        lastOverlapModeIndex = overlapModeIndex;
+        m_compressor.setOverlapMode(overlapModeIndex == 0 ? BarkFFTCompressor::OverlapMode::Half
+                                                          : BarkFFTCompressor::OverlapMode::ThreeQuarter);
         m_compressor.prepare(getSampleRate());
         setLatencySamples(m_compressor.getLatencySamples());
     }
@@ -247,7 +247,7 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
 }
 
 juce::AudioProcessorEditor* PhuBarkFFTCompressorAudioProcessor::createEditor() {
-    return new PhuBarkFFTCompressorAudioProcessorEditor(*this);
+    return new PhuBarkFFTCompressorAudioProcessorEditor<float>(*this);
 }
 
 bool PhuBarkFFTCompressorAudioProcessor::hasEditor() const { return true; }

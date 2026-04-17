@@ -16,6 +16,7 @@ namespace audio {
  * fftSize samples. Each process() call drains only the NEW samples from the
  * FIFO and shifts them in, then recomputes the FFT.
  */
+template <typename SampleType = float>
 class FFTProcessor {
   public:
     explicit FFTProcessor(int fftOrder = 14)

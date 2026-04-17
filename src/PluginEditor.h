@@ -4,10 +4,9 @@
 #include "SpectrumDisplay.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 
-using phu::audio::FFTProcessor;
-
 class PhuBarkFFTCompressorAudioProcessor;
 
+template <typename SampleType = float>
 class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEditor,
                                                   public juce::Timer {
   public:
@@ -22,11 +21,11 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     PhuBarkFFTCompressorAudioProcessor& audioProcessor;
 
     // FFT processors for spectrum visualization (UI thread only)
-    FFTProcessor inputFFT{11};  // Match compressor FFT order
-    FFTProcessor outputFFT{11};
+    phu::audio::FFTProcessor<SampleType> inputFFT{11};  // Match compressor FFT order
+    phu::audio::FFTProcessor<SampleType> outputFFT{11};
 
     // Spectrum display component
-    SpectrumDisplay spectrumDisplay;
+    SpectrumDisplay<SampleType> spectrumDisplay;
 
     // Gain reduction meter panel (24 vertical bars)
     class GainReductionPanel : public juce::Component {
@@ -67,12 +66,13 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     juce::Label fftModeLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> fftModeAttachment;
 
+    juce::ComboBox overlapCombo;
+    juce::Label overlapLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> overlapAttachment;
+
     juce::Slider smoothingSlider;
     juce::Label smoothingLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> smoothingAttachment;
-
-    juce::ToggleButton phaseVocodingToggle;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> phaseVocodingAttachment;
 
     // ── Transient Shaper controls ────────────────────────────────────────
     juce::GroupComponent transientShaperGroup;
@@ -100,5 +100,5 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     juce::ToggleButton barkEnergyToggle;
     juce::ToggleButton grCurveToggle;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PhuBarkFFTCompressorAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PhuBarkFFTCompressorAudioProcessorEditor<SampleType>)
 };
