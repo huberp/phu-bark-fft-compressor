@@ -116,7 +116,7 @@ class AudioSampleFifo {
 
   private:
     juce::AbstractFifo fifo;
-    alignas(32) std::array<std::array<float, kFifoSize>, NumChannels> buffer;
+        std::array<std::array<float, kFifoSize>, NumChannels> buffer;
 };
 
 } // namespace audio
