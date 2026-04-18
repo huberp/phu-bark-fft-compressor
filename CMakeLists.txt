@@ -11,6 +11,6 @@ set(JUCE_BUILD_EXAMPLES OFF CACHE BOOL "Build JUCE Examples")
 set(JUCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/JUCE" CACHE PATH "Path to JUCE root")
 add_subdirectory("${JUCE_ROOT}")
 
-add_subdirectory(phu-audio-lib)
+add_subdirectory(phu-audio-lib EXCLUDE_FROM_ALL)
 add_subdirectory(lib)
 add_subdirectory(src)
