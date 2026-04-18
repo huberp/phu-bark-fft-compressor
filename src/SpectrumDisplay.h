@@ -1,7 +1,7 @@
 #pragma once
 
-#include "../lib/audio/BarkFFTCompressor.h"
-#include "../lib/audio/FFTProcessor.h"
+#include "audio/BarkFFTCompressor.h"
+#include "audio/FFTProcessor.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 
 using phu::audio::BarkFFTCompressor;

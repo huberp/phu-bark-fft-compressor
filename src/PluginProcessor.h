@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../lib/audio/AudioSampleFifo.h"
-#include "../lib/audio/BarkFFTCompressor.h"
-#include "../lib/audio/TransientShaper.h"
+#include "audio/AudioSampleFifo.h"
+#include "audio/BarkFFTCompressor.h"
+#include "audio/TransientShaper.h"
 #include <atomic>
 #include <juce_audio_processors/juce_audio_processors.h>
 
