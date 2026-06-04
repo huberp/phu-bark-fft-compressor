@@ -120,9 +120,9 @@ cmake --build --preset release
 
 **With Intel MKL:** Set the `MKLROOT` environment variable before running CMake:
 ```powershell
-# For 64-bit installation (most common):
+# For 64-bit MKL (most common):
 $env:MKLROOT = "C:\Program Files\Intel\oneAPI\mkl\latest"
-# For 32-bit installation:
+# For 32-bit MKL on 64-bit Windows:
 # $env:MKLROOT = "C:\Program Files (x86)\Intel\oneAPI\mkl\latest"
 cmake --preset vs2026-x64
 cmake --build --preset release
