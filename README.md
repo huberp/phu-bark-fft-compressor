@@ -96,7 +96,7 @@ A VST3 spectral compressor that operates independently on each of the 24 psychoa
 | CMake | 3.15 |
 | C++ compiler | C++17 — MSVC 2022, GCC 11, or Clang 14 |
 | JUCE | 8.0.12 (included as git submodule) |
-| Intel MKL | Any (optional) for FFT acceleration |
+| Intel MKL | oneAPI 2021.1+ (optional) for FFT acceleration |
 
 **Intel MKL (optional):** If Intel MKL is installed and the `MKLROOT` environment variable is set, the build will automatically use MKL's optimised FFT implementation instead of JUCE's fallback. This can significantly improve FFT performance. To disable MKL support, pass `-DUSE_INTEL_MKL=OFF` to CMake.
 
