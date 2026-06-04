@@ -96,6 +96,9 @@ A VST3 spectral compressor that operates independently on each of the 24 psychoa
 | CMake | 3.15 |
 | C++ compiler | C++17 — MSVC 2022, GCC 11, or Clang 14 |
 | JUCE | 8.0.12 (included as git submodule) |
+| Intel MKL | (optional) for FFT acceleration |
+
+**Intel MKL (optional):** If Intel MKL is installed and the `MKLROOT` environment variable is set, the build will automatically use MKL's optimised FFT implementation instead of JUCE's fallback. This can significantly improve FFT performance. To disable MKL support, pass `-DUSE_INTEL_MKL=OFF` to CMake.
 
 ### Clone
 
@@ -115,12 +118,26 @@ cmake --preset vs2026-x64
 cmake --build --preset release
 ```
 
+**With Intel MKL:** Set the `MKLROOT` environment variable before running CMake:
+```powershell
+$env:MKLROOT = "C:\Program Files (x86)\Intel\oneAPI\mkl\latest"
+cmake --preset vs2026-x64
+cmake --build --preset release
+```
+
 Output: `build/vs2026-x64/src/phu-bark-fft-compressor_artefacts/Release/VST3/`
 
 ### Linux
 
 ```bash
 sudo bash scripts/install-linux-deps.sh
+cmake --preset linux-release
+cmake --build --preset linux-build
+```
+
+**With Intel MKL:** Set the `MKLROOT` environment variable before running CMake:
+```bash
+export MKLROOT=/opt/intel/oneapi/mkl/latest
 cmake --preset linux-release
 cmake --build --preset linux-build
 ```
