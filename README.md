@@ -145,6 +145,8 @@ cmake --preset linux-release
 cmake --build --preset linux-build
 ```
 
+**Note:** The `export` command sets MKLROOT only for the current terminal session. To make it persistent, add the export to your shell profile (e.g., `~/.bashrc` or `~/.zshrc`).
+
 If the build times out: `cmake --build --preset linux-build -j2`
 
 Output: `build/linux-release/src/phu-bark-fft-compressor_artefacts/VST3/`
