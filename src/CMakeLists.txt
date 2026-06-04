@@ -35,9 +35,8 @@ endif()
 
 # Intel MKL support
 if(USE_INTEL_MKL AND MKL_FOUND)
-    target_compile_options(phu-bark-fft-compressor PRIVATE $<TARGET_PROPERTY:MKL::MKL,INTERFACE_COMPILE_OPTIONS>)
-    target_include_directories(phu-bark-fft-compressor PRIVATE $<TARGET_PROPERTY:MKL::MKL,INTERFACE_INCLUDE_DIRECTORIES>)
     target_compile_definitions(phu-bark-fft-compressor PRIVATE JUCE_DSP_USE_INTEL_MKL=1)
+    target_link_libraries(phu-bark-fft-compressor PRIVATE $<LINK_ONLY:MKL::MKL>)
     message(STATUS "Intel MKL FFT support enabled for phu-bark-fft-compressor")
 endif()
 
@@ -52,7 +51,9 @@ target_link_libraries(phu-bark-fft-compressor
         juce::juce_recommended_warning_flags
 )
 
-# Link Intel MKL if available
+# Intel MKL support
 if(USE_INTEL_MKL AND MKL_FOUND)
+    target_compile_definitions(phu-bark-fft-compressor PRIVATE JUCE_DSP_USE_INTEL_MKL=1)
     target_link_libraries(phu-bark-fft-compressor PRIVATE $<LINK_ONLY:MKL::MKL>)
+    message(STATUS "Intel MKL FFT support enabled for phu-bark-fft-compressor")
 endif()
