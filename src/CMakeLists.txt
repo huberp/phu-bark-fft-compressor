@@ -33,6 +33,14 @@ if(WIN32)
     target_compile_definitions(phu-bark-fft-compressor PUBLIC NOMINMAX)
 endif()
 
+# Intel MKL support
+if(USE_INTEL_MKL AND MKL_FOUND)
+    target_compile_options(phu-bark-fft-compressor PUBLIC $<TARGET_PROPERTY:MKL::MKL,INTERFACE_COMPILE_OPTIONS>)
+    target_include_directories(phu-bark-fft-compressor PUBLIC $<TARGET_PROPERTY:MKL::MKL,INTERFACE_INCLUDE_DIRECTORIES>)
+    target_compile_definitions(phu-bark-fft-compressor PRIVATE JUCE_DSP_USE_INTEL_MKL=1)
+    message(STATUS "Intel MKL FFT support enabled for phu-bark-fft-compressor")
+endif()
+
 target_link_libraries(phu-bark-fft-compressor
     PRIVATE
         BarkCompressorLib
@@ -43,3 +51,8 @@ target_link_libraries(phu-bark-fft-compressor
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
+
+# Link Intel MKL if available
+if(USE_INTEL_MKL AND MKL_FOUND)
+    target_link_libraries(phu-bark-fft-compressor PUBLIC $<LINK_ONLY:MKL::MKL>)
+endif()
