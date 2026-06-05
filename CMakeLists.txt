@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Intel MKL configuration (optional)
-# Set MKL_ROOT or MKLROOT environment variable to enable MKL FFT support
+# Set MKLROOT and, when needed, MKL_DIR to enable MKL FFT support
 option(USE_INTEL_MKL "Use Intel MKL for FFT acceleration" ON)
 
 if(USE_INTEL_MKL)
@@ -14,10 +14,24 @@ if(USE_INTEL_MKL)
     # Use sequential threading to avoid runtime dependency on threading libraries
     # This prevents the plugin from requiring libopenmp5 on target systems
     set(MKL_THREADING "sequential")
-    find_package(MKL CONFIG PATHS $ENV{MKLROOT})
+
+    set(_mkl_hints)
+    foreach(_mkl_hint IN ITEMS
+        "$ENV{MKL_DIR}"
+        "$ENV{MKLROOT}"
+        "$ENV{MKLROOT}/lib/cmake/mkl"
+        "$ENV{MKLROOT}/lib/native/lib/cmake/mkl"
+    )
+        if(_mkl_hint)
+            list(APPEND _mkl_hints "${_mkl_hint}")
+        endif()
+    endforeach()
+
+    find_package(MKL CONFIG HINTS ${_mkl_hints})
     
     if(MKL_FOUND)
         message(STATUS "Intel MKL found: ${MKL_IMPORTED_TARGETS}")
+        message(STATUS "Intel MKL link mode: ${MKL_LINK}, threading: ${MKL_THREADING}")
     else()
         message(STATUS "Intel MKL not found - FFT will use JUCE's fallback implementation")
         set(USE_INTEL_MKL OFF)

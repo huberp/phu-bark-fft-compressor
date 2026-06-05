@@ -98,7 +98,7 @@ A VST3 spectral compressor that operates independently on each of the 24 psychoa
 | JUCE | 8.0.12 (included as git submodule) |
 | Intel MKL | oneAPI 2021.1+ (optional) for FFT acceleration |
 
-**Intel MKL (optional):** If Intel MKL is installed and the `MKLROOT` environment variable is set, the build will automatically use MKL's optimised FFT implementation instead of JUCE's fallback. This can significantly improve FFT performance. To disable MKL support, pass `-DUSE_INTEL_MKL=OFF` to CMake.
+**Intel MKL (optional):** If Intel MKL is installed and the `MKLROOT` environment variable is set, the build will automatically use MKL's optimised FFT implementation instead of JUCE's fallback. If CMake cannot find the package config automatically, also set `MKL_DIR` to the folder containing `MKLConfig.cmake`. To disable MKL support, pass `-DUSE_INTEL_MKL=OFF` to CMake.
 
 ### Clone
 
@@ -118,10 +118,11 @@ cmake --preset vs2026-x64
 cmake --build --preset release
 ```
 
-**With Intel MKL:** Set the `MKLROOT` environment variable before running CMake:
+**With Intel MKL:** Set the `MKLROOT` environment variable before running CMake. If needed, also point `MKL_DIR` at the package config directory:
 ```powershell
 # For 64-bit MKL (most common):
 $env:MKLROOT = "C:\Program Files\Intel\oneAPI\mkl\latest"
+$env:MKL_DIR = "$env:MKLROOT\lib\cmake\mkl"
 # For 32-bit MKL on 64-bit Windows:
 # $env:MKLROOT = "C:\Program Files (x86)\Intel\oneAPI\mkl\latest"
 cmake --preset vs2026-x64
@@ -138,9 +139,10 @@ cmake --preset linux-release
 cmake --build --preset linux-build
 ```
 
-**With Intel MKL:** Set the `MKLROOT` environment variable before running CMake:
+**With Intel MKL:** Set the `MKLROOT` environment variable before running CMake. If needed, also point `MKL_DIR` at the package config directory:
 ```bash
 export MKLROOT=/opt/intel/oneapi/mkl/latest
+export MKL_DIR="$MKLROOT/lib/cmake/mkl"
 cmake --preset linux-release
 cmake --build --preset linux-build
 ```

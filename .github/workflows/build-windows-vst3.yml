@@ -73,16 +73,28 @@ jobs:
             -Version $env:MKL_NUGET_VERSION `
             -OutputDirectory "$env:RUNNER_TEMP\mkl_pkg"
 
-      - name: Set MKLROOT (x64)
+      - name: Locate MKL package (x64)
         if: ${{ inputs.arch == 'x64' }}
         shell: pwsh
         run: |
-          $mklRoot = "$env:RUNNER_TEMP\mkl_pkg\intelmkl.static.win-x64.$env:MKL_NUGET_VERSION\runtimes\win-x64\native"
-          if (Test-Path $mklRoot) {
+          $packageRoot = "$env:RUNNER_TEMP\mkl_pkg\intelmkl.static.win-x64.$env:MKL_NUGET_VERSION"
+          $mklConfig = Get-ChildItem -Path $packageRoot -Recurse -Filter "MKLConfig.cmake" -ErrorAction SilentlyContinue | Select-Object -First 1
+          $mklRoot = @(
+            "$packageRoot\lib\native"
+            "$packageRoot\build\native"
+            "$packageRoot\runtimes\win-x64\native"
+          ) | Where-Object {
+            Test-Path (Join-Path $_ "include")
+          } | Select-Object -First 1
+
+          if ($mklConfig -and $mklRoot) {
+            $mklDir = Split-Path $mklConfig.FullName -Parent
             echo "MKLROOT=$mklRoot" >> $env:GITHUB_ENV
+            echo "MKL_DIR=$mklDir" >> $env:GITHUB_ENV
             Write-Host "MKLROOT set to: $mklRoot"
+            Write-Host "MKL_DIR set to:  $mklDir"
           } else {
-            Write-Warning "MKL native path not found at $mklRoot — MKL will be skipped"
+            Write-Warning "MKL package metadata not found under $packageRoot — MKL will be skipped"
           }
 
       # -----------------------------------------------------------------------
@@ -92,13 +104,69 @@ jobs:
         shell: pwsh
         run: |
           # ARM64: Intel MKL ships no ARM64 binaries, so explicitly disable it.
-          # x64:   MKLROOT is set by the preceding "Set MKLROOT" step when MKL
+          # x64:   MKLROOT/MKL_DIR are set by the preceding discovery step when MKL
           #        is available; CMakeLists.txt falls back gracefully if not set.
-          $mklFlag = if ("${{ inputs.arch }}" -eq "ARM64") { "-DUSE_INTEL_MKL=OFF" } else { "" }
-          cmake -B $env:BUILD_DIR -DCMAKE_BUILD_TYPE=Release -A ${{ inputs.arch }} $mklFlag
+          $cmakeArgs = @(
+            "-B", $env:BUILD_DIR,
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-A", "${{ inputs.arch }}"
+          )
+          if ("${{ inputs.arch }}" -eq "ARM64") {
+            $cmakeArgs += "-DUSE_INTEL_MKL=OFF"
+          } elseif ($env:MKL_DIR) {
+            $cmakeArgs += "-DMKL_DIR=$env:MKL_DIR"
+          }
+          cmake @cmakeArgs
 
       - name: Build
         run: cmake --build ${{ env.BUILD_DIR }} --config Release
+
+      - name: Verify MKL static linking
+        if: ${{ inputs.arch == 'x64' }}
+        shell: pwsh
+        run: |
+          if (-not $env:MKL_DIR) {
+            throw "MKL_DIR was not set, so static MKL linking could not be configured."
+          }
+
+          $projectFile = Get-ChildItem -Path $env:BUILD_DIR -Recurse -Filter "*.vcxproj" |
+            Where-Object { $_.BaseName -like "phu-bark-fft-compressor*" } |
+            Select-Object -First 1
+          if (-not $projectFile) {
+            throw "Generated Visual Studio project was not found."
+          }
+
+          $projectText = Get-Content -Path $projectFile.FullName -Raw
+          foreach ($requiredLib in @("mkl_core.lib", "mkl_intel_lp64.lib", "mkl_sequential.lib")) {
+            if ($projectText -notmatch [regex]::Escape($requiredLib)) {
+              throw "Expected MKL static library '$requiredLib' was not present in $($projectFile.Name)."
+            }
+          }
+
+          $pluginBinary = Get-ChildItem -Path $env:BUILD_DIR -Recurse -File -Filter "*.vst3" | Select-Object -First 1
+          if (-not $pluginBinary) {
+            throw "Built VST3 binary not found."
+          }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsInstallPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsInstallPath) {
+            throw "Visual Studio installation not found."
+          }
+
+          $dumpbin = Get-ChildItem -Path (Join-Path $vsInstallPath "VC\Tools\MSVC") -Recurse -Filter "dumpbin.exe" |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $dumpbin) {
+            throw "dumpbin.exe not found."
+          }
+
+          $dependents = (& $dumpbin.FullName /dependents $pluginBinary.FullName | Out-String)
+          if ($dependents -match '(?im)^\s*(mkl.*\.dll|libiomp5md\.dll)\s*$') {
+            throw "The built plugin still depends on MKL/OpenMP runtime DLLs:`n$dependents"
+          }
+
+          Write-Host "Verified static MKL linkage for $($pluginBinary.FullName)"
 
       # -----------------------------------------------------------------------
       # Validation (optional)
