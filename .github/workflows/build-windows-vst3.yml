@@ -166,16 +166,20 @@ jobs:
             throw "Visual Studio installation not found."
           }
 
-          $dumpbin = Get-ChildItem -Path (Join-Path $vsInstallPath "VC\Tools\MSVC") -Filter "dumpbin.exe" -File `
-            -Recurse -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -like "*\bin\Hostx64\x64\dumpbin.exe" } |
-            Sort-Object LastWriteTime -Descending |
+          $msvcToolsRoot = Join-Path $vsInstallPath "VC\Tools\MSVC"
+          $latestMsvcDir = Get-ChildItem -Path $msvcToolsRoot -Directory -ErrorAction SilentlyContinue |
+            Sort-Object { [version]$_.Name } -Descending |
             Select-Object -First 1
-          if (-not $dumpbin) {
+          if (-not $latestMsvcDir) {
+            throw "MSVC toolchain directory not found under $msvcToolsRoot"
+          }
+
+          $dumpbin = Join-Path $latestMsvcDir.FullName "bin\Hostx64\x64\dumpbin.exe"
+          if (-not (Test-Path $dumpbin)) {
             throw "dumpbin.exe not found."
           }
 
-          $dependents = (& $dumpbin.FullName /dependents $pluginBinary.FullName | Out-String)
+          $dependents = (& $dumpbin /dependents $pluginBinary.FullName | Out-String)
           $dllDependents = $dependents -split '\r?\n' |
             ForEach-Object { $_.Trim() } |
             Where-Object { $_ -match '\.dll$' } |
