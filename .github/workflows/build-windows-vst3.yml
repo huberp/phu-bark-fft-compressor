@@ -77,26 +77,32 @@ jobs:
         if: ${{ inputs.arch == 'x64' }}
         shell: pwsh
         run: |
-          $packageRoot = "$env:RUNNER_TEMP\mkl_pkg\intelmkl.static.win-x64.$env:MKL_NUGET_VERSION"
-          $mklConfig = Get-ChildItem -Path $packageRoot -Recurse -Filter "MKLConfig.cmake" -ErrorAction SilentlyContinue | Select-Object -First 1
-          $mklRootCandidates = @(
-            "$packageRoot\lib\native"
-            "$packageRoot\build\native"
-            "$packageRoot\runtimes\win-x64\native"
-          )
-          $mklRoot = $mklRootCandidates | Where-Object {
-            Test-Path (Join-Path $_ "include")
-          } | Select-Object -First 1
-
-          if ($mklConfig -and $mklRoot) {
-            $mklDir = Split-Path $mklConfig.FullName -Parent
-            echo "MKLROOT=$mklRoot" >> $env:GITHUB_ENV
-            echo "MKL_DIR=$mklDir" >> $env:GITHUB_ENV
-            Write-Host "MKLROOT set to: $mklRoot"
-            Write-Host "MKL_DIR set to:  $mklDir"
-          } else {
-            Write-Warning "MKL package metadata not found under $packageRoot — MKL will be skipped"
+          $cacheRoot = "$env:RUNNER_TEMP\mkl_pkg"
+          if (-not (Test-Path $cacheRoot)) {
+            throw "Intel MKL cache directory was not found at $cacheRoot"
           }
+
+          $mklConfig = Get-ChildItem -Path $cacheRoot -Recurse -Filter "MKLConfig.cmake" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $mklConfig) {
+            throw "MKLConfig.cmake was not found under $cacheRoot"
+          }
+
+          $mklDir = Split-Path $mklConfig.FullName -Parent
+          $mklHeader = Get-ChildItem -Path $cacheRoot -Recurse -Filter "mkl.h" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          $mklRoot = if ($mklHeader) {
+            Split-Path $mklHeader.Directory.FullName -Parent
+          } else {
+            $cacheRoot
+          }
+
+          echo "MKLROOT=$mklRoot" >> $env:GITHUB_ENV
+          echo "MKL_DIR=$mklDir" >> $env:GITHUB_ENV
+          Write-Host "MKL cache root: $cacheRoot"
+          Write-Host "MKLConfig found at: $($mklConfig.FullName)"
+          Write-Host "MKLROOT set to: $mklRoot"
+          Write-Host "MKL_DIR set to:  $mklDir"
 
       # -----------------------------------------------------------------------
       # Build
