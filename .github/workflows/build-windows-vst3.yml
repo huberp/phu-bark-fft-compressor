@@ -160,14 +160,17 @@ jobs:
           }
 
           $dumpbin = Get-ChildItem -Path (Join-Path $vsInstallPath "VC\Tools\MSVC") -Recurse -Filter "dumpbin.exe" |
-            Sort-Object FullName -Descending |
+            Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
           if (-not $dumpbin) {
             throw "dumpbin.exe not found."
           }
 
           $dependents = (& $dumpbin.FullName /dependents $pluginBinary.FullName | Out-String)
-          if ($dependents -match '(?im)^\s*(mkl.*\.dll|libiomp5md\.dll)\s*$') {
+          $dllDependents = $dependents -split '\r?\n' |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -match '\.dll$' }
+          if ($dllDependents | Where-Object { $_ -imatch '^(mkl.*\.dll|libiomp5md\.dll)$' }) {
             throw "The built plugin still depends on MKL/OpenMP runtime DLLs:`n$dependents"
           }
 
