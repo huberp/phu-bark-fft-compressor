@@ -91,9 +91,14 @@ jobs:
           $mklDir = Split-Path $mklConfig.FullName -Parent
           $mklHeader = Get-ChildItem -Path $cacheRoot -Recurse -Filter "mkl.h" -ErrorAction SilentlyContinue |
             Select-Object -First 1
-          $mklRoot = if ($mklHeader) {
+          if ($mklHeader -and $mklHeader.Directory.Name -ieq "include") {
             Split-Path $mklHeader.Directory.FullName -Parent
           } else {
+            if ($mklHeader) {
+              Write-Warning "Found mkl.h at unexpected path '$($mklHeader.FullName)'; using $cacheRoot as MKLROOT fallback"
+            } else {
+              Write-Warning "mkl.h was not found under $cacheRoot; using $cacheRoot as MKLROOT fallback"
+            }
             $cacheRoot
           }
 
