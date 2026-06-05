@@ -14,96 +14,26 @@ jobs:
   # ---------------------------------------------------------------------------
   release-windows-x64:
     name: Windows x64 VST3
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Configure CMake (x64)
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -A x64
-
-      - name: Build Release
-        run: cmake --build build --config Release
-
-      - name: Validate VST3 with pluginval
-        shell: pwsh
-        run: |
-          Write-Host "Downloading pluginval..."
-          Invoke-WebRequest `
-            -Uri "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_Windows.zip" `
-            -OutFile "pluginval.zip"
-          Expand-Archive -Path "pluginval.zip" -DestinationPath "pluginval" -Force
-
-          $vst3 = Get-ChildItem -Recurse `
-            -Path "build" `
-            -Filter "*.vst3" -Directory | Select-Object -First 1 -ExpandProperty FullName
-
-          Write-Host "Validating: $vst3"
-          .\pluginval\pluginval.exe --strictness-level 5 --validate-in-process --validate "$vst3"
-
-      - name: Package VST3
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
-          $zipName = "PHU-BARK-FFT-COMPRESSOR-windows-x64-${version}.zip"
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          New-Item -ItemType Directory -Force -Path staging | Out-Null
-
-          $vst3 = Get-ChildItem -Recurse `
-            -Path "build" `
-            -Filter "*.vst3" -Directory | Select-Object -First 1
-
-          Copy-Item -Path $vst3.FullName -Destination "staging" -Recurse
-          Compress-Archive -Path "staging\*" -DestinationPath "dist\$zipName" -Force
-          Write-Host "Created dist\$zipName"
-
-      - name: Upload Windows x64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-x64-vst3
-          path: dist/*.zip
+    uses: ./.github/workflows/build-windows-vst3.yml
+    with:
+      arch: x64
+      run-pluginval: true
+      upload-artifact: true
+      artifact-name: windows-x64-vst3
+      ref-name: ${{ github.ref_name }}
 
   # ---------------------------------------------------------------------------
   # Build & package Windows ARM64 VST3 (cross-compiled on x64 runner)
   # ---------------------------------------------------------------------------
   release-windows-arm64:
     name: Windows ARM64 VST3
-    runs-on: windows-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Configure CMake (ARM64 cross-compile)
-        run: cmake -B build-arm64 -DCMAKE_BUILD_TYPE=Release -A ARM64
-
-      - name: Build Release
-        run: cmake --build build-arm64 --config Release
-
-      - name: Package VST3
-        shell: pwsh
-        run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
-          $zipName = "PHU-BARK-FFT-COMPRESSOR-windows-arm64-${version}.zip"
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          New-Item -ItemType Directory -Force -Path staging | Out-Null
-
-          $vst3 = Get-ChildItem -Recurse `
-            -Path "build-arm64" `
-            -Filter "*.vst3" -Directory | Select-Object -First 1
-
-          Copy-Item -Path $vst3.FullName -Destination "staging" -Recurse
-          Compress-Archive -Path "staging\*" -DestinationPath "dist\$zipName" -Force
-          Write-Host "Created dist\$zipName"
-
-      - name: Upload Windows ARM64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-arm64-vst3
-          path: dist/*.zip
+    uses: ./.github/workflows/build-windows-vst3.yml
+    with:
+      arch: ARM64
+      run-pluginval: false
+      upload-artifact: true
+      artifact-name: windows-arm64-vst3
+      ref-name: ${{ github.ref_name }}
 
   # ---------------------------------------------------------------------------
   # Build & package Linux VST3
