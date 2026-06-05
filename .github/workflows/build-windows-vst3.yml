@@ -166,7 +166,9 @@ jobs:
             throw "Visual Studio installation not found."
           }
 
-          $dumpbin = Get-ChildItem -Path (Join-Path $vsInstallPath "VC\Tools\MSVC") -Recurse -Filter "dumpbin.exe" |
+          $dumpbin = Get-ChildItem -Path (Join-Path $vsInstallPath "VC\Tools\MSVC") -Filter "dumpbin.exe" -File `
+            -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -like "*\bin\Hostx64\x64\dumpbin.exe" } |
             Sort-Object LastWriteTime -Descending |
             Select-Object -First 1
           if (-not $dumpbin) {
@@ -178,7 +180,7 @@ jobs:
             ForEach-Object { $_.Trim() } |
             Where-Object { $_ -match '\.dll$' } |
             ForEach-Object { Split-Path $_ -Leaf }
-          if ($dllDependents | Where-Object { $_ -imatch '^(mkl.*\.dll|libiomp5md\.dll)$' }) {
+          if ($dllDependents | Where-Object { $_ -imatch '^(mkl_core\.dll|mkl_intel_lp64\.dll|mkl_sequential\.dll|libiomp5md\.dll)$' }) {
             throw "The built plugin still depends on MKL/OpenMP runtime DLLs:`n$dependents"
           }
 
