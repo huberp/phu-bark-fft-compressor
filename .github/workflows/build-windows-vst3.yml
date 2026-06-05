@@ -149,7 +149,7 @@ jobs:
             throw "Built VST3 bundle not found."
           }
 
-          $pluginBinary = Get-ChildItem -Path $pluginBundle.FullName -Recurse -File -Filter "*.vst3" | Select-Object -First 1
+          $pluginBinary = Get-ChildItem -Path $pluginBundle.FullName -Recurse -File -Filter "*.dll" | Select-Object -First 1
           if (-not $pluginBinary) {
             throw "Built VST3 binary not found inside $($pluginBundle.FullName)."
           }
@@ -173,7 +173,8 @@ jobs:
           $dependents = (& $dumpbin.FullName /dependents $pluginBinary.FullName | Out-String)
           $dllDependents = $dependents -split '\r?\n' |
             ForEach-Object { $_.Trim() } |
-            Where-Object { $_ -match '\.dll$' }
+            Where-Object { $_ -match '\.dll$' } |
+            ForEach-Object { Split-Path $_ -Leaf }
           if ($dllDependents | Where-Object { $_ -imatch '^(mkl.*\.dll|libiomp5md\.dll)$' }) {
             throw "The built plugin still depends on MKL/OpenMP runtime DLLs:`n$dependents"
           }
