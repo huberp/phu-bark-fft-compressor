@@ -143,9 +143,14 @@ jobs:
             }
           }
 
-          $pluginBinary = Get-ChildItem -Path $env:BUILD_DIR -Recurse -File -Filter "*.vst3" | Select-Object -First 1
+          $pluginBundle = Get-ChildItem -Path $env:BUILD_DIR -Recurse -Directory -Filter "*.vst3" | Select-Object -First 1
+          if (-not $pluginBundle) {
+            throw "Built VST3 bundle not found."
+          }
+
+          $pluginBinary = Get-ChildItem -Path $pluginBundle.FullName -Recurse -File -Filter "*.vst3" | Select-Object -First 1
           if (-not $pluginBinary) {
-            throw "Built VST3 binary not found."
+            throw "Built VST3 binary not found inside $($pluginBundle.FullName)."
           }
 
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
