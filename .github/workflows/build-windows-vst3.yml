@@ -79,11 +79,12 @@ jobs:
         run: |
           $packageRoot = "$env:RUNNER_TEMP\mkl_pkg\intelmkl.static.win-x64.$env:MKL_NUGET_VERSION"
           $mklConfig = Get-ChildItem -Path $packageRoot -Recurse -Filter "MKLConfig.cmake" -ErrorAction SilentlyContinue | Select-Object -First 1
-          $mklRoot = @(
+          $mklRootCandidates = @(
             "$packageRoot\lib\native"
             "$packageRoot\build\native"
             "$packageRoot\runtimes\win-x64\native"
-          ) | Where-Object {
+          )
+          $mklRoot = $mklRootCandidates | Where-Object {
             Test-Path (Join-Path $_ "include")
           } | Select-Object -First 1
 
@@ -154,6 +155,9 @@ jobs:
           }
 
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) {
+            throw "vswhere.exe was not found at $vswhere"
+          }
           $vsInstallPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           if (-not $vsInstallPath) {
             throw "Visual Studio installation not found."
