@@ -91,7 +91,7 @@ jobs:
           $mklDir = Split-Path $mklConfig.FullName -Parent
           $mklHeader = Get-ChildItem -Path $cacheRoot -Recurse -Filter "mkl.h" -ErrorAction SilentlyContinue |
             Select-Object -First 1
-          if ($mklHeader -and $mklHeader.Directory.Name -ieq "include") {
+          $mklRoot = if ($mklHeader -and $mklHeader.Directory.Name -ieq "include") {
             Split-Path $mklHeader.Directory.FullName -Parent
           } else {
             if ($mklHeader) {
