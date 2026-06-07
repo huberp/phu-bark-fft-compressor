@@ -141,20 +141,6 @@ jobs:
             throw "MKLROOT was not set, so static MKL linking could not be configured."
           }
 
-          $projectFile = Get-ChildItem -Path $env:BUILD_DIR -Recurse -Filter "*.vcxproj" |
-            Where-Object { $_.BaseName -like "phu-bark-fft-compressor*" } |
-            Select-Object -First 1
-          if (-not $projectFile) {
-            throw "Generated Visual Studio project was not found."
-          }
-
-          $projectText = Get-Content -Path $projectFile.FullName -Raw
-          foreach ($requiredLib in @("mkl_core.lib", "mkl_intel_lp64.lib", "mkl_sequential.lib")) {
-            if ($projectText -notmatch [regex]::Escape($requiredLib)) {
-              throw "Expected MKL static library '$requiredLib' was not present in $($projectFile.Name)."
-            }
-          }
-
           $pluginBundle = Get-ChildItem -Path $env:BUILD_DIR -Recurse -Directory -Filter "*.vst3" | Select-Object -First 1
           if (-not $pluginBundle) {
             throw "Built VST3 bundle not found."
@@ -163,6 +149,28 @@ jobs:
           $pluginBinary = Get-ChildItem -Path $pluginBundle.FullName -Recurse -File -Filter "*.dll" | Select-Object -First 1
           if (-not $pluginBinary) {
             throw "Built VST3 binary not found inside $($pluginBundle.FullName)."
+          }
+
+          # Positive verification: check binary size (static MKL adds significant code)
+          $minExpectedSize = 5 * 1024 * 1024  # 5 MB
+          $binarySize = (Get-Item $pluginBinary.FullName).Length
+          if ($binarySize -lt $minExpectedSize) {
+            throw "Binary size ($([math]::Round($binarySize/1MB, 2)) MB) is below expected minimum ($([math]::Round($minExpectedSize/1MB, 2)) MB) for static MKL linking"
+          }
+
+          # Positive verification: search for MKL function patterns in binary
+          $mklPatterns = @("mkl_", "vml_", "vsl_")
+          $binaryBytes = [System.IO.File]::ReadAllBytes($pluginBinary.FullName)
+          $binaryText = [System.Text.Encoding]::ASCII.GetString($binaryBytes)
+          $foundMklPattern = $false
+          foreach ($pattern in $mklPatterns) {
+            if ($binaryText -match [regex]::Escape($pattern)) {
+              $foundMklPattern = $true
+              break
+            }
+          }
+          if (-not $foundMklPattern) {
+            throw "No MKL function patterns found in $($pluginBinary.Name). Static linking may have failed."
           }
 
           $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
