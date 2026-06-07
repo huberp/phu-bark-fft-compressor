@@ -82,32 +82,29 @@ jobs:
             throw "Intel MKL cache directory was not found at $cacheRoot"
           }
 
-          $mklConfig = Get-ChildItem -Path $cacheRoot -Recurse -Filter "MKLConfig.cmake" -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-          if (-not $mklConfig) {
-            throw "MKLConfig.cmake was not found under $cacheRoot"
-          }
-
-          $mklDir = Split-Path $mklConfig.FullName -Parent
           $mklHeader = Get-ChildItem -Path $cacheRoot -Recurse -Filter "mkl.h" -ErrorAction SilentlyContinue |
             Select-Object -First 1
-          $mklRoot = if ($mklHeader -and $mklHeader.Directory.Name -ieq "include") {
+          if (-not $mklHeader) {
+            throw "mkl.h was not found under $cacheRoot"
+          }
+
+          $mklRoot = if ($mklHeader.Directory.Name -ieq "include") {
             Split-Path $mklHeader.Directory.FullName -Parent
           } else {
-            if ($mklHeader) {
-              Write-Warning "Found mkl.h at unexpected path '$($mklHeader.FullName)'; using $cacheRoot as MKLROOT fallback"
-            } else {
-              Write-Warning "mkl.h was not found under $cacheRoot; using $cacheRoot as MKLROOT fallback"
+            throw "Found mkl.h at unexpected path '$($mklHeader.FullName)'"
+          }
+
+          $requiredLibs = @("mkl_core.lib", "mkl_intel_lp64.lib", "mkl_sequential.lib")
+          foreach ($requiredLib in $requiredLibs) {
+            $libPath = Join-Path $mklRoot "win-x64\$requiredLib"
+            if (-not (Test-Path $libPath)) {
+              throw "Required MKL static library '$requiredLib' was not found at '$libPath'"
             }
-            $cacheRoot
           }
 
           echo "MKLROOT=$mklRoot" >> $env:GITHUB_ENV
-          echo "MKL_DIR=$mklDir" >> $env:GITHUB_ENV
           Write-Host "MKL cache root: $cacheRoot"
-          Write-Host "MKLConfig found at: $($mklConfig.FullName)"
           Write-Host "MKLROOT set to: $mklRoot"
-          Write-Host "MKL_DIR set to:  $mklDir"
 
       # -----------------------------------------------------------------------
       # Build
@@ -116,7 +113,7 @@ jobs:
         shell: pwsh
         run: |
           # ARM64: Intel MKL ships no ARM64 binaries, so explicitly disable it.
-          # x64:   MKLROOT/MKL_DIR are set by the preceding discovery step when MKL
+          # x64:   MKLROOT is set by the preceding discovery step when MKL
           #        is available; CMakeLists.txt falls back gracefully if not set.
           $cmakeArgs = @(
             "-B", $env:BUILD_DIR,
@@ -126,10 +123,10 @@ jobs:
           if ("${{ inputs.arch }}" -eq "ARM64") {
             $cmakeArgs += "-DUSE_INTEL_MKL=OFF"
           } elseif ("${{ inputs.arch }}" -eq "x64") {
-            if (-not $env:MKL_DIR) {
-              throw "MKL package discovery failed for x64: MKL_DIR was not set."
+            if (-not $env:MKLROOT) {
+              throw "MKL package discovery failed for x64: MKLROOT was not set."
             }
-            $cmakeArgs += "-DMKL_DIR=$env:MKL_DIR"
+            $cmakeArgs += "-DMKLROOT=$env:MKLROOT"
           }
           cmake @cmakeArgs
 
@@ -140,8 +137,8 @@ jobs:
         if: ${{ inputs.arch == 'x64' }}
         shell: pwsh
         run: |
-          if (-not $env:MKL_DIR) {
-            throw "MKL_DIR was not set, so static MKL linking could not be configured."
+          if (-not $env:MKLROOT) {
+            throw "MKLROOT was not set, so static MKL linking could not be configured."
           }
 
           $projectFile = Get-ChildItem -Path $env:BUILD_DIR -Recurse -Filter "*.vcxproj" |
