@@ -18,6 +18,8 @@ if(USE_INTEL_MKL)
         set(_mkl_root "$ENV{MKLROOT}")
     endif()
 
+    # If no _mkl_root has been set by user/environment detect from standard NuGet cache location on Windows 
+    # Select latest version if there are multiple
     if(NOT _mkl_root AND WIN32 AND DEFINED ENV{USERPROFILE})
         file(GLOB _nuget_mkl_roots "$ENV{USERPROFILE}/.nuget/packages/intelmkl.static.win-x64/*/build/native")
         list(SORT _nuget_mkl_roots COMPARE NATURAL ORDER DESCENDING)
