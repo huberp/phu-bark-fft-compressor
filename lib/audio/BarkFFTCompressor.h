@@ -5,6 +5,8 @@
 #include <vector>
 #include <juce_dsp/juce_dsp.h>
 #include "memory/AlignedAllocator.h"
+#include "EqualLoudnessContour.h"
+#include "OLAWindow.h"
 
 namespace phu {
 namespace audio {
@@ -34,17 +36,11 @@ class BarkFFTCompressor {
     // Overlap mode: controls the hop size as a fraction of the FFT window.
     //   Half          → hop = N/2 (50% overlap, lower CPU)
     //   ThreeQuarter  → hop = N/4 (75% overlap, higher quality, 2× CPU)
-    enum class OverlapMode { Half, ThreeQuarter };
+    //   Ninety        → hop = N/10 (90% overlap, highest quality, 10× CPU)
+    enum class OverlapMode { Half, ThreeQuarter, Ninety };
 
-    // Equal-loudness contour presets
-    enum class ContourPreset {
-        ISO226_20Phon = 0,
-        ISO226_40Phon,
-        ISO226_60Phon,
-        ISO226_80Phon,
-        Flat,
-        NumPresets
-    };
+    // Equal-loudness contour presets (re-exported from EqualLoudnessContour)
+    using ContourPreset = EqualLoudnessContour::Preset;
 
     BarkFFTCompressor() {
         // Allocate FFT engine for the default mode (Precision, 44.1 kHz → order 11)
@@ -90,13 +86,16 @@ class BarkFFTCompressor {
         // Count trailing shifts to find log2(currentFFTSize), e.g. 2048→11, 4096→12.
         { int sz = currentFFTSize; while (sz > 1) { ++currentFFTOrder; sz >>= 1; } }
         currentNumBins  = currentFFTSize / 2;
-        // Hop size depends on overlap mode:
-        //   Half (50%):         hop = N/2, COLA sum = 1.0 → scale = 1.0
-        //   ThreeQuarter (75%): hop = N/4, COLA sum = 2.0 → scale = 0.5
-        currentHopSize = (currentOverlapMode == OverlapMode::ThreeQuarter)
-                       ? currentFFTSize / 4
-                       : currentFFTSize / 2;
-        olaScaleFactor = (currentOverlapMode == OverlapMode::ThreeQuarter) ? 0.5f : 1.0f;
+        
+        // Create OLA window with appropriate overlap factor
+        float overlapFactor = 0.5f;
+        if (currentOverlapMode == OverlapMode::ThreeQuarter)
+            overlapFactor = 0.75f;
+        else if (currentOverlapMode == OverlapMode::Ninety)
+            overlapFactor = 0.9f;
+        olaWindow = std::make_unique<OLAWindow>(currentFFTSize, overlapFactor);
+        currentHopSize = olaWindow->getHopSize();
+        olaScaleFactor = olaWindow->getScaleFactor();
 
         // Normalise raw FFT power to dBFS (depends on FFT size so must be updated here).
         // JUCE's forward transform is unnormalized: for a 0-dBFS sine with a Hann window of
@@ -110,7 +109,6 @@ class BarkFFTCompressor {
 
         // Resize all dynamic buffers.
         const int ringSize = currentFFTSize * 2;
-        hannWindow      .assign(currentFFTSize, 0.0f);
         binToBand       .assign(currentNumBins, 0);
         binGains        .assign(currentNumBins, 1.0f);
         binLogFreq      .assign(currentNumBins, 0.0f);
@@ -126,7 +124,6 @@ class BarkFFTCompressor {
 
 
         // Verify 32-byte alignment of performance-critical buffers (debug only).
-        jassert (reinterpret_cast<uintptr_t>(hannWindow.data())    % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(binGains.data())      % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(binLogFreq.data())    % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(inputRingMono.data()) % 32 == 0);
@@ -138,22 +135,8 @@ class BarkFFTCompressor {
         jassert (reinterpret_cast<uintptr_t>(fftBufferL.data())    % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(fftBufferR.data())    % 32 == 0);
 
-        // Pre-compute periodic Hann window (denominator = FFT_SIZE, not FFT_SIZE-1).
-        // The periodic form satisfies the COLA condition:
-        //   At 50% overlap (hop=N/2): Σ w[n + m·N/2] = 1.0  → olaScaleFactor = 1.0
-        //   At 75% overlap (hop=N/4): Σ w[n + m·N/4] = 2.0  → olaScaleFactor = 0.5
-        // Perfect reconstruction is achieved by scaling the OLA accumulation
-        // by olaScaleFactor. No synthesis window is applied.
-        for (int i = 0; i < currentFFTSize; ++i) {
-            hannWindow[i] = 0.5f * (1.0f - std::cos(2.0f * kPi * static_cast<float>(i)
-                                                     / static_cast<float>(currentFFTSize)));
-        }
-
         // Pre-compute bin-to-Bark mapping
         computeBinToBarkMapping();
-
-        // Pre-compute equal-loudness contour adjustments
-        computeEqualLoudnessContours();
 
         // Update attack/release coefficients
         updateCoefficients();
@@ -199,10 +182,7 @@ class BarkFFTCompressor {
     }
 
     void setContourPreset(ContourPreset preset) {
-        if (preset != currentPreset) {
-            currentPreset = preset;
-            // No recomputation needed - we index into the precomputed table at runtime
-        }
+        contour.setPreset(preset);
     }
 
     /**
@@ -291,11 +271,7 @@ class BarkFFTCompressor {
 
     /** Get the SPL adjustment for a given band in the current contour preset. */
     float getContourAdjustmentDb(int band) const {
-        if (band >= 0 && band < NUM_BARK_BANDS) {
-            int idx = static_cast<int>(currentPreset);
-            return contourTables[idx][band];
-        }
-        return 0.0f;
+        return contour.getAdjustmentDb(band);
     }
 
     /** Get the center frequency of a Bark band. */
@@ -323,7 +299,7 @@ class BarkFFTCompressor {
     int getLatencySamples() const { return currentFFTSize; }
 
     /** Get the current contour preset. */
-    ContourPreset getContourPreset() const { return currentPreset; }
+    ContourPreset getContourPreset() const { return contour.getPreset(); }
 
     /** Get current sample rate. */
     float getSampleRate() const { return currentSampleRate; }
@@ -335,14 +311,7 @@ class BarkFFTCompressor {
 
     /** Get name for a contour preset. */
     static const char* getContourPresetName(ContourPreset preset) {
-        switch (preset) {
-            case ContourPreset::ISO226_20Phon: return "ISO 226 - 20 phon";
-            case ContourPreset::ISO226_40Phon: return "ISO 226 - 40 phon";
-            case ContourPreset::ISO226_60Phon: return "ISO 226 - 60 phon";
-            case ContourPreset::ISO226_80Phon: return "ISO 226 - 80 phon";
-            case ContourPreset::Flat:          return "Flat (no contour)";
-            default:                           return "Unknown";
-        }
+        return EqualLoudnessContour::getPresetName(preset);
     }
 
   private:
@@ -437,53 +406,7 @@ class BarkFFTCompressor {
             bandCenterLogFreq[i] = std::log10(std::max(barkBandCenterFreqs[i], 0.5f));
     }
 
-    /**
-     * Pre-compute equal-loudness contour SPL adjustments for each Bark band.
-     *
-     * These represent the relative SPL (dB) needed at each band's center frequency
-     * to be perceived as equally loud. Values are derived from ISO 226 curves.
-     * Positive = ear is less sensitive (needs more SPL), negative = more sensitive.
-     */
-    void computeEqualLoudnessContours() {
-        // ISO 226 approximate equal-loudness contours for 24 Bark bands
-        // Band center frequencies (Bark): 0.5, 1.5, 2.5, ..., 23.5
-        // Values: relative dB adjustment (0 dB = reference at 1 kHz region)
 
-        // 20 phon: very quiet listening - large bass/treble boost needed
-        contourTables[0] = {{
-            40.0f,  30.0f,  22.0f,  16.0f,  12.0f,  9.0f,   6.0f,   4.0f,
-             2.0f,   0.0f,  -1.0f,  -2.0f,  -2.0f,  -2.0f,  -1.0f,   0.0f,
-             1.0f,   3.0f,   5.0f,   8.0f,  12.0f,  16.0f,  22.0f,  30.0f
-        }};
-
-        // 40 phon: moderate listening level - moderate bass/treble boost
-        contourTables[1] = {{
-            28.0f,  20.0f,  14.0f,  10.0f,   7.0f,   5.0f,   3.0f,   2.0f,
-             1.0f,   0.0f,  -1.0f,  -1.5f,  -1.5f,  -1.0f,  -0.5f,   0.0f,
-             0.5f,   1.5f,   3.0f,   5.0f,   8.0f,  12.0f,  18.0f,  25.0f
-        }};
-
-        // 60 phon: comfortable listening - mild bass/treble boost
-        contourTables[2] = {{
-            18.0f,  12.0f,   8.0f,   5.0f,   3.0f,   2.0f,   1.0f,   0.5f,
-             0.0f,   0.0f,  -0.5f,  -1.0f,  -1.0f,  -0.5f,   0.0f,   0.0f,
-             0.5f,   1.0f,   2.0f,   3.0f,   5.0f,   8.0f,  13.0f,  19.0f
-        }};
-
-        // 80 phon: loud listening - nearly flat
-        contourTables[3] = {{
-            10.0f,   6.0f,   3.0f,   1.5f,   0.5f,   0.0f,   0.0f,   0.0f,
-             0.0f,   0.0f,   0.0f,  -0.5f,  -0.5f,   0.0f,   0.0f,   0.0f,
-             0.0f,   0.5f,   1.0f,   1.5f,   3.0f,   5.0f,   8.0f,  12.0f
-        }};
-
-        // Flat: no contour adjustment
-        contourTables[4] = {{
-            0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-            0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f
-        }};
-    }
 
     /** Update attack/release smoothing coefficients from ms values. */
     void updateCoefficients() {
@@ -522,12 +445,24 @@ class BarkFFTCompressor {
         // ── Step 1: Analysis ─────────────────────────────────────────────
         // Window + FFT on the mono mix to compute per-band compression gains.
         const int ringSize = currentFFTSize * 2;
-        for (int i = 0; i < currentFFTSize; ++i) {
-            int ringIdx = (ringWritePos - currentFFTSize + i + ringSize) % ringSize;
-            fftBuffer[i] = inputRingMono[ringIdx] * hannWindow[i];
+        
+        // Split-at-wrap ring buffer copy (SIMD-friendly)
+        const int startIdx = (ringWritePos - currentFFTSize + ringSize) % ringSize;
+        const int firstLen = ringSize - startIdx;
+        if (firstLen >= currentFFTSize) {
+            // No wrap: single contiguous copy
+            juce::FloatVectorOperations::copy(fftBuffer.data(), inputRingMono.data() + startIdx, currentFFTSize);
+        } else {
+            // Wraps: two segments
+            juce::FloatVectorOperations::copy(fftBuffer.data(), inputRingMono.data() + startIdx, firstLen);
+            juce::FloatVectorOperations::copy(fftBuffer.data() + firstLen, inputRingMono.data(), currentFFTSize - firstLen);
         }
-        for (int i = currentFFTSize; i < ringSize; ++i)
-            fftBuffer[i] = 0.0f;
+        
+        // Apply Hann window (SIMD)
+        olaWindow->applyForFFTInPlace(fftBuffer.data());
+        
+        // Zero-pad second half for real FFT
+        juce::FloatVectorOperations::clear(fftBuffer.data() + currentFFTSize, currentFFTSize);
 
         fft->performRealOnlyForwardTransform(fftBuffer.data());
 
@@ -540,7 +475,7 @@ class BarkFFTCompressor {
         }
 
         // ── Step 2: Compute per-band gains ───────────────────────────────
-        const auto& splAdjustments = contourTables[static_cast<int>(currentPreset)];
+        const float* splAdjustments = contour.getAdjustments();
 
         std::array<float, NUM_BARK_BANDS> bandGainLinear{};
         for (int i = 0; i < NUM_BARK_BANDS; ++i) {
@@ -687,12 +622,23 @@ class BarkFFTCompressor {
         auto synthesiseChannel = [&](const phu::memory::AlignedVector<float>& inRing,
                                      phu::memory::AlignedVector<float>& outRing,
                                      phu::memory::AlignedVector<float>& buf) {
-            for (int i = 0; i < currentFFTSize; ++i) {
-                int ringIdx = (ringWritePos - currentFFTSize + i + ringSize) % ringSize;
-                buf[i] = inRing[ringIdx] * hannWindow[i];
+            // Split-at-wrap ring buffer copy (SIMD-friendly)
+            const int startIdx = (ringWritePos - currentFFTSize + ringSize) % ringSize;
+            const int firstLen = ringSize - startIdx;
+            if (firstLen >= currentFFTSize) {
+                // No wrap: single contiguous copy
+                juce::FloatVectorOperations::copy(buf.data(), inRing.data() + startIdx, currentFFTSize);
+            } else {
+                // Wraps: two segments
+                juce::FloatVectorOperations::copy(buf.data(), inRing.data() + startIdx, firstLen);
+                juce::FloatVectorOperations::copy(buf.data() + firstLen, inRing.data(), currentFFTSize - firstLen);
             }
-            for (int i = currentFFTSize; i < ringSize; ++i)
-                buf[i] = 0.0f;
+            
+            // Apply Hann window (SIMD)
+            olaWindow->applyForFFTInPlace(buf.data());
+            
+            // Zero-pad second half for real FFT
+            juce::FloatVectorOperations::clear(buf.data() + currentFFTSize, currentFFTSize);
 
             fft->performRealOnlyForwardTransform(buf.data());
 
@@ -704,11 +650,16 @@ class BarkFFTCompressor {
 
             fft->performRealOnlyInverseTransform(buf.data());
 
-            // OLA: accumulate IFFT output scaled by olaScaleFactor for COLA normalisation.
-            const float scale = olaScaleFactor;
-            for (int i = 0; i < currentFFTSize; ++i) {
-                int outIdx = (ringWritePos - currentFFTSize + i + ringSize) % ringSize;
-                outRing[outIdx] += buf[i] * scale;
+            // OLA: accumulate IFFT output with COLA scale (SIMD)
+            const int outStartIdx = (ringWritePos - currentFFTSize + ringSize) % ringSize;
+            const int outFirstLen = ringSize - outStartIdx;
+            if (outFirstLen >= currentFFTSize) {
+                // No wrap: single accumulation
+                olaWindow->applyAndAccumulate(buf.data(), outRing.data() + outStartIdx, currentFFTSize);
+            } else {
+                // Wraps: two accumulations
+                olaWindow->applyAndAccumulate(buf.data(), outRing.data() + outStartIdx, outFirstLen);
+                olaWindow->applyAndAccumulate(buf.data() + outFirstLen, outRing.data(), currentFFTSize - outFirstLen);
             }
         };
 
@@ -738,8 +689,10 @@ class BarkFFTCompressor {
     float ratio             = 4.0f;
     float attackMs          = 10.0f;
     float releaseMs         = 100.0f;
-    ContourPreset currentPreset = ContourPreset::ISO226_40Phon;
-    float smoothingAlpha        = 0.70f; // bidirectional IIR coefficient (1=off, 0=max smooth)
+    float smoothingAlpha    = 0.70f; // bidirectional IIR coefficient (1=off, 0=max smooth)
+
+    // Equal-loudness contour engine
+    EqualLoudnessContour contour;
 
     // ── Smoothing coefficients ───────────────────────────────────────────
 
@@ -748,7 +701,7 @@ class BarkFFTCompressor {
 
     // ── Pre-computed lookup tables (size depends on FFT mode) ────────────
 
-    phu::memory::AlignedVector<float> hannWindow;    // [currentFFTSize]
+    std::unique_ptr<OLAWindow> olaWindow;  // Handles window generation and OLA operations
     std::vector<int>   binToBand;     // [currentNumBins]
     // Per-bin gain array. Populated each frame by log-frequency interpolation
     // (processFFTFrame step 2b), then optionally refined by the secondary IIR pass.
@@ -766,10 +719,6 @@ class BarkFFTCompressor {
     std::array<float, NUM_BARK_BANDS> barkBandCenterFreqs{};
     std::array<float, NUM_BARK_BANDS> barkBandLowFreqs{};
     std::array<float, NUM_BARK_BANDS> barkBandHighFreqs{};
-
-    // Equal-loudness contour tables: [preset_index][band]
-    static constexpr int kNumContourPresets = static_cast<int>(ContourPreset::NumPresets);
-    std::array<std::array<float, NUM_BARK_BANDS>, kNumContourPresets> contourTables{};
 
     // ── Per-band state ───────────────────────────────────────────────────
 
