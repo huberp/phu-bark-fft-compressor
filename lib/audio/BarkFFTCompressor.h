@@ -466,12 +466,23 @@ class BarkFFTCompressor {
 
         fft->performRealOnlyForwardTransform(fftBuffer.data());
 
-        // Accumulate power per Bark band
+        // Accumulate POWER per Bark band - using sqrt here is not necessary.
+        // we use power later to convert to dB, so we can save some CPU by skipping the sqrt and working with power directly.
         std::array<float, NUM_BARK_BANDS> barkEnergies{};
-        for (int k = 0; k < currentNumBins; ++k) {
-            float re = fftBuffer[k * 2];
-            float im = fftBuffer[k * 2 + 1];
-            barkEnergies[binToBand[k]] += re * re + im * im;
+        // the following two loops are split on purpose to allow the compiler use simd instructions for the first loop 
+        // without worrying about the band accumulation in the second loop.
+        // first individually square each number in the fftBuffer, then accumulate into barkEnergies 
+        // the fftBuffer contains interleaved real and imaginary parts of the FFT output: [Re(0), Im(0), Re(1), Im(1), ..., Re(N/2-1), Im(N/2-1)]
+        for (int k = 0; k < currentNumBins*2; ++k)
+        {
+            const auto num = fftBuffer[k];
+            fftBuffer[k] = num * num;
+        }
+        // next accumulate the power of each bin into the corresponding Bark band
+        for (int k = 0; k < currentNumBins; ++k)
+        {   
+            const auto power = fftBuffer[k*2] + fftBuffer[k*2+1];
+            barkEnergies[binToBand[k]] += power;
         }
 
         // ── Step 2: Compute per-band gains ───────────────────────────────
