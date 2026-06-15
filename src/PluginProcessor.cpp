@@ -77,7 +77,7 @@ PhuBarkFFTCompressorAudioProcessor::createParameterLayout() {
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{PARAM_OVERLAP_MODE, 1},
         "Overlap",
-        juce::StringArray{"50% (Low CPU)", "75% (High Quality)"},
+        juce::StringArray{"50% (Low CPU)", "75% (High Quality)", "90% (Highest Quality)"},
         0)); // Default: 50%
 
     // ── Transient Shaper ─────────────────────────────────────────────────
@@ -127,8 +127,12 @@ void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int /*
 
     const int overlapModeIndex = static_cast<int>(overlapModeParam->load());
     lastOverlapModeIndex = overlapModeIndex;
-    m_compressor.setOverlapMode(overlapModeIndex == 0 ? BarkFFTCompressor::OverlapMode::Half
-                                                      : BarkFFTCompressor::OverlapMode::ThreeQuarter);
+    static const BarkFFTCompressor::OverlapMode overlapModes[] = {
+        BarkFFTCompressor::OverlapMode::Half,
+        BarkFFTCompressor::OverlapMode::ThreeQuarter,
+        BarkFFTCompressor::OverlapMode::Ninety
+    };
+    m_compressor.setOverlapMode(overlapModes[overlapModeIndex]);
 
     m_compressor.prepare(sampleRate);
 

@@ -73,17 +73,38 @@ jobs:
             -Version $env:MKL_NUGET_VERSION `
             -OutputDirectory "$env:RUNNER_TEMP\mkl_pkg"
 
-      - name: Set MKLROOT (x64)
+      - name: Locate MKL package (x64)
         if: ${{ inputs.arch == 'x64' }}
         shell: pwsh
         run: |
-          $mklRoot = "$env:RUNNER_TEMP\mkl_pkg\intelmkl.static.win-x64.$env:MKL_NUGET_VERSION\runtimes\win-x64\native"
-          if (Test-Path $mklRoot) {
-            echo "MKLROOT=$mklRoot" >> $env:GITHUB_ENV
-            Write-Host "MKLROOT set to: $mklRoot"
-          } else {
-            Write-Warning "MKL native path not found at $mklRoot — MKL will be skipped"
+          $cacheRoot = "$env:RUNNER_TEMP\mkl_pkg"
+          if (-not (Test-Path $cacheRoot)) {
+            throw "Intel MKL cache directory was not found at $cacheRoot"
           }
+
+          $mklHeader = Get-ChildItem -Path $cacheRoot -Recurse -Filter "mkl.h" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $mklHeader) {
+            throw "mkl.h was not found under $cacheRoot"
+          }
+
+          $mklRoot = if ($mklHeader.Directory.Name -ieq "include") {
+            Split-Path $mklHeader.Directory.FullName -Parent
+          } else {
+            throw "Found mkl.h at unexpected path '$($mklHeader.FullName)'"
+          }
+
+          $requiredLibs = @("mkl_core.lib", "mkl_intel_lp64.lib", "mkl_sequential.lib")
+          foreach ($requiredLib in $requiredLibs) {
+            $libPath = Join-Path $mklRoot "win-x64\$requiredLib"
+            if (-not (Test-Path $libPath)) {
+              throw "Required MKL static library '$requiredLib' was not found at '$libPath'"
+            }
+          }
+
+          echo "MKLROOT=$mklRoot" >> $env:GITHUB_ENV
+          Write-Host "MKL cache root: $cacheRoot"
+          Write-Host "MKLROOT set to: $mklRoot"
 
       # -----------------------------------------------------------------------
       # Build
@@ -92,13 +113,93 @@ jobs:
         shell: pwsh
         run: |
           # ARM64: Intel MKL ships no ARM64 binaries, so explicitly disable it.
-          # x64:   MKLROOT is set by the preceding "Set MKLROOT" step when MKL
+          # x64:   MKLROOT is set by the preceding discovery step when MKL
           #        is available; CMakeLists.txt falls back gracefully if not set.
-          $mklFlag = if ("${{ inputs.arch }}" -eq "ARM64") { "-DUSE_INTEL_MKL=OFF" } else { "" }
-          cmake -B $env:BUILD_DIR -DCMAKE_BUILD_TYPE=Release -A ${{ inputs.arch }} $mklFlag
+          $cmakeArgs = @(
+            "-B", $env:BUILD_DIR,
+            "-DCMAKE_BUILD_TYPE=Release",
+            "-A", "${{ inputs.arch }}"
+          )
+          if ("${{ inputs.arch }}" -eq "ARM64") {
+            $cmakeArgs += "-DUSE_INTEL_MKL=OFF"
+          } elseif ("${{ inputs.arch }}" -eq "x64") {
+            if (-not $env:MKLROOT) {
+              throw "MKL package discovery failed for x64: MKLROOT was not set."
+            }
+            $cmakeArgs += "-DMKLROOT=$env:MKLROOT"
+          }
+          cmake @cmakeArgs
 
       - name: Build
         run: cmake --build ${{ env.BUILD_DIR }} --config Release
+
+      - name: Verify MKL static linking
+        if: ${{ inputs.arch == 'x64' }}
+        shell: pwsh
+        run: |
+          if (-not $env:MKLROOT) {
+            throw "MKLROOT was not set, so static MKL linking could not be configured."
+          }
+
+          $pluginBinary = Get-ChildItem -Path $env:BUILD_DIR -Recurse -File -Filter "*.vst3" | Select-Object -First 1
+          if (-not $pluginBinary) {
+            throw "Built VST3 binary (*.vst3) not found."
+          }
+
+          # Positive verification: check binary size (static MKL adds significant code)
+          $minExpectedSize = 5 * 1024 * 1024  # 5 MB
+          $binarySize = (Get-Item $pluginBinary.FullName).Length
+          if ($binarySize -lt $minExpectedSize) {
+            throw "Binary size ($([math]::Round($binarySize/1MB, 2)) MB) is below expected minimum ($([math]::Round($minExpectedSize/1MB, 2)) MB) for static MKL linking"
+          }
+
+          # Positive verification: search for MKL function patterns in binary
+          $mklPatterns = @("mkl_", "vml_", "vsl_")
+          $binaryBytes = [System.IO.File]::ReadAllBytes($pluginBinary.FullName)
+          $binaryText = [System.Text.Encoding]::ASCII.GetString($binaryBytes)
+          $foundMklPattern = $false
+          foreach ($pattern in $mklPatterns) {
+            if ($binaryText -match [regex]::Escape($pattern)) {
+              $foundMklPattern = $true
+              break
+            }
+          }
+          if (-not $foundMklPattern) {
+            throw "No MKL function patterns found in $($pluginBinary.Name). Static linking may have failed."
+          }
+
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} "Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) {
+            throw "vswhere.exe was not found at $vswhere"
+          }
+          $vsInstallPath = & $vswhere -latest -products * -property installationPath
+          if (-not $vsInstallPath) {
+            throw "Visual Studio installation not found."
+          }
+
+          $msvcToolsRoot = Join-Path $vsInstallPath "VC\Tools\MSVC"
+          $latestMsvcDir = Get-ChildItem -Path $msvcToolsRoot -Directory -ErrorAction SilentlyContinue |
+            Sort-Object { [version]$_.Name } -Descending |
+            Select-Object -First 1
+          if (-not $latestMsvcDir) {
+            throw "MSVC toolchain directory not found under $msvcToolsRoot"
+          }
+
+          $dumpbin = Join-Path $latestMsvcDir.FullName "bin\Hostx64\x64\dumpbin.exe"
+          if (-not (Test-Path $dumpbin)) {
+            throw "dumpbin.exe not found."
+          }
+
+          $dependents = (& $dumpbin /dependents $pluginBinary.FullName | Out-String)
+          $dllDependents = $dependents -split '\r?\n' |
+            ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -match '\.dll$' } |
+            ForEach-Object { Split-Path $_ -Leaf }
+          if ($dllDependents | Where-Object { $_ -imatch '^(mkl_core\.dll|mkl_intel_lp64\.dll|mkl_sequential\.dll|libiomp5md\.dll)$' }) {
+            throw "The built plugin still depends on MKL/OpenMP runtime DLLs:`n$dependents"
+          }
+
+          Write-Host "Verified static MKL linkage for $($pluginBinary.FullName)"
 
       # -----------------------------------------------------------------------
       # Validation (optional)

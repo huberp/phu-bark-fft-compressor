@@ -255,8 +255,10 @@ PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioP
 
     overlapCombo.addItem("50% (Low CPU)", 1);
     overlapCombo.addItem("75% (High Quality)", 2);
-    overlapCombo.setTooltip("Select between 50% overlap (lower CPU) or "
-                            "75% overlap (higher quality, 2x CPU cost).");
+    overlapCombo.addItem("90% (High Quality)", 3);
+    overlapCombo.setTooltip("Select between 50% overlap (lower CPU), "
+                            "75% overlap (higher quality, 2x CPU cost) or "
+                            "90% overlap (highest quality, 4x CPU cost).");
     addAndMakeVisible(overlapCombo);
     overlapAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_OVERLAP_MODE,
