@@ -51,10 +51,10 @@ jobs:
         run: sudo bash scripts/install-linux-deps.sh
 
       - name: Configure CMake
-        run: cmake --preset linux-release
+        run: cmake --preset linux-x64-vst3-release
 
       - name: Build
-        run: cmake --build --preset linux-build
+        run: cmake --build --preset linux-x64-vst3-release-build
 
       - name: Package VST3
         run: |
