@@ -63,7 +63,7 @@ jobs:
           ZIP_NAME="PHU-BARK-FFT-COMPRESSOR-linux-${VERSION}.zip"
           mkdir -p dist
 
-          VST3_PATH=$(find build/linux-release/src/phu-bark-fft-compressor_artefacts/Release/VST3 \
+          VST3_PATH=$(find build/linux-x64-vst3-release/src/phu-bark-fft-compressor_artefacts/Release/VST3 \
             -name "*.vst3" -type d | head -n 1)
 
           if [ -z "$VST3_PATH" ]; then
