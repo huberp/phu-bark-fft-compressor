@@ -34,7 +34,7 @@ jobs:
           cache: true
 
       - name: Install LaTeX SVG package
-        run: 
+        run: |
           tlmgr install svg
           tlmgr install fontspec
           tlmgr install noto-fonts
@@ -51,7 +51,11 @@ jobs:
         run: |
           INPUT="${{ inputs.in-md }}"
           OUTPUT="${INPUT%.*}.pdf"
-          pandoc "$INPUT" -o "$OUTPUT"
+          pandoc "$INPUT" -o "$OUTPUT" \
+              --pdf-engine=xelatex \
+               -V mainfont="Noto Serif" \
+               -V sansfont="Noto Sans" \
+               -V monofont="Noto Mono"
           echo "pdf-path=$OUTPUT" >> $GITHUB_OUTPUT
 
       - name: Upload PDF artifact
