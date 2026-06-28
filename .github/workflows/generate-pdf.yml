@@ -34,7 +34,11 @@ jobs:
           cache: true
 
       - name: Install LaTeX SVG package
-        run: tlmgr install svg
+        run: 
+          tlmgr install svg
+          tlmgr install fontspec
+          tlmgr install noto-fonts
+          tlmgr install unicode-math
 
       - name: Install librsvg (for SVG support)
         run: sudo apt-get install -y librsvg2-bin
