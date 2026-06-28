@@ -37,7 +37,6 @@ jobs:
         run: |
           tlmgr install svg
           tlmgr install fontspec
-          tlmgr install noto-fonts
           tlmgr install unicode-math
 
       - name: Install librsvg (for SVG support)
@@ -53,9 +52,9 @@ jobs:
           OUTPUT="${INPUT%.*}.pdf"
           pandoc "$INPUT" -o "$OUTPUT" \
               --pdf-engine=xelatex \
-               -V mainfont="Noto Serif" \
-               -V sansfont="Noto Sans" \
-               -V monofont="Noto Mono"
+              -V mainfont="DejaVu Serif" \
+              -V sansfont="DejaVu Sans" \
+              -V monofont="DejaVu Sans Mono"
           echo "pdf-path=$OUTPUT" >> $GITHUB_OUTPUT
 
       - name: Upload PDF artifact
