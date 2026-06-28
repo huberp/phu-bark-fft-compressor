@@ -33,6 +33,12 @@ jobs:
         with:
           cache: true
 
+      - name: Install LaTeX SVG package
+        run: tlmgr install svg
+
+      - name: Install librsvg (for SVG support)
+        run: sudo apt-get install -y librsvg2-bin
+
       - name: Install Pandoc
         run: sudo apt-get update && sudo apt-get install -y pandoc
 
