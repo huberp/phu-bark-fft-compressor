@@ -1,5 +1,3 @@
-name: Release
-
 on:
   push:
     tags:
@@ -82,11 +80,20 @@ jobs:
           path: dist/*.zip
 
   # ---------------------------------------------------------------------------
-  # Generate README.pdf, inject into all zips, publish GitHub Release
+  # Generate README.pdf
+  # ---------------------------------------------------------------------------
+  generate-pdf:
+    name: Generate README.pdf
+    uses: ./.github/workflows/generate-pdf.yml
+    with:
+      in-md: README.md
+
+  # ---------------------------------------------------------------------------
+  # Inject README.pdf into all zips, publish GitHub Release
   # ---------------------------------------------------------------------------
   publish-release:
     name: Publish GitHub Release
-    needs: [release-windows-x64, release-windows-arm64, release-linux]
+    needs: [release-windows-x64, release-windows-arm64, release-linux, generate-pdf]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -110,10 +117,11 @@ jobs:
           name: linux-vst3
           path: dist/
 
-      - name: Generate README.pdf
-        run: |
-          npm install -g md-to-pdf
-          cat README.md | md-to-pdf > README.pdf
+      - name: Download README.pdf artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: pdf
+          path: .
 
       - name: Inject README.pdf into all release zips
         run: |
