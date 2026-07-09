@@ -1,39 +1,50 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
+#include "Iso226.h"
 
 namespace phu {
 namespace audio {
 
 /**
- * EqualLoudnessContour — ISO 226 equal-loudness contour adjustments for 24 Bark bands.
+ * EqualLoudnessContour — Equal-loudness contour adjustments for 24 Bark bands.
  *
- * Provides relative SPL (dB) adjustments for each Bark band at different listening levels
- * (phon curves). Positive values = ear is less sensitive (needs more SPL), negative = more sensitive.
+ * Provides relative SPL (dB) adjustments for each Bark band at different listening levels.
+ * Supports both hardcoded "Smile" curves (legacy) and computed ISO 226 contours.
  *
  * Usage:
  *   EqualLoudnessContour contour;
  *   contour.setPreset(EqualLoudnessContour::Preset::ISO226_40Phon);
  *   float adjustment = contour.getAdjustmentDb(bandIndex);
  *
- * Header-only, no dependencies beyond standard library.
+ * Header-only, depends on Iso226.h for computed contours.
  */
 class EqualLoudnessContour {
   public:
-    // Equal-loudness contour presets based on ISO 226
+    // Equal-loudness contour presets
     enum class Preset {
-        ISO226_20Phon = 0,  // Very quiet listening - large bass/treble boost needed
-        ISO226_40Phon,      // Moderate listening - moderate bass/treble boost
-        ISO226_60Phon,      // Comfortable listening - mild bass/treble boost
-        ISO226_80Phon,      // Loud listening - nearly flat
-        Flat,               // No contour adjustment
+        // Legacy hardcoded "Smile" curves (renamed from ISO226_*Phon)
+        Smile_20Phon = 0,  // Very quiet listening - large bass/treble boost needed
+        Smile_40Phon,      // Moderate listening - moderate bass/treble boost
+        Smile_60Phon,      // Comfortable listening - mild bass/treble boost
+        Smile_80Phon,      // Loud listening - nearly flat
+        
+        // New ISO 226 computed contours (normalized to min=0.0)
+        ISO226_20Phon,     // Very quiet listening - computed from ISO 226
+        ISO226_40Phon,     // Moderate listening - computed from ISO 226
+        ISO226_60Phon,     // Comfortable listening - computed from ISO 226
+        ISO226_80Phon,     // Loud listening - computed from ISO 226
+        
+        Flat,              // No contour adjustment
         NumPresets
     };
 
     static constexpr int NUM_BARK_BANDS = 24;
 
     EqualLoudnessContour() {
-        computeContours();
+        computeHardcodedContours();
+        computeIso226Contours();
     }
 
     /**
@@ -42,7 +53,7 @@ class EqualLoudnessContour {
      */
     void setPreset(Preset preset) {
         if (preset != currentPreset && 
-            preset >= Preset::ISO226_20Phon && 
+            preset >= Preset::Smile_20Phon && 
             preset < Preset::NumPresets) {
             currentPreset = preset;
         }
@@ -77,64 +88,123 @@ class EqualLoudnessContour {
     /** Get human-readable name for a contour preset. */
     static const char* getPresetName(Preset preset) {
         switch (preset) {
+            // Legacy Smile curves
+            case Preset::Smile_20Phon: return "Smile - 20 phon";
+            case Preset::Smile_40Phon: return "Smile - 40 phon";
+            case Preset::Smile_60Phon: return "Smile - 60 phon";
+            case Preset::Smile_80Phon: return "Smile - 80 phon";
+            
+            // Computed ISO 226 contours
             case Preset::ISO226_20Phon: return "ISO 226 - 20 phon";
             case Preset::ISO226_40Phon: return "ISO 226 - 40 phon";
             case Preset::ISO226_60Phon: return "ISO 226 - 60 phon";
             case Preset::ISO226_80Phon: return "ISO 226 - 80 phon";
+            
             case Preset::Flat:          return "Flat (no contour)";
             default:                    return "Unknown";
         }
     }
 
   private:
+    // Pre-computed Bark band center frequencies (Hz)
+    static constexpr std::array<float, NUM_BARK_BANDS> barkBandCenterFreqs = {
+        50.0f, 150.0f, 250.0f, 350.0f, 450.0f, 570.0f, 700.0f, 840.0f,
+        1000.0f, 1170.0f, 1370.0f, 1600.0f, 1850.0f, 2150.0f, 2500.0f, 2900.0f,
+        3400.0f, 3950.0f, 4600.0f, 5350.0f, 6200.0f, 7200.0f, 8400.0f, 9800.0f
+    };
+
     /**
-     * Pre-compute equal-loudness contour SPL adjustments for each Bark band.
-     *
-     * These represent the relative SPL (dB) needed at each band's center frequency
-     * to be perceived as equally loud. Values are derived from ISO 226 curves.
-     * Positive = ear is less sensitive (needs more SPL), negative = more sensitive.
-     *
-     * Band center frequencies (Bark): 0.5, 1.5, 2.5, ..., 23.5
-     * Values: relative dB adjustment (0 dB = reference at 1 kHz region)
+     * Pre-compute hardcoded "Smile" contours (legacy).
+     * These are the original hand-tuned curves.
      */
-    void computeContours() {
+    void computeHardcodedContours() {
         // 20 phon: very quiet listening - large bass/treble boost needed
-        contourTables[0] = {{
+        contourTables[static_cast<int>(Preset::Smile_20Phon)] = {{
             40.0f,  30.0f,  22.0f,  16.0f,  12.0f,  9.0f,   6.0f,   4.0f,
              2.0f,   0.0f,  -1.0f,  -2.0f,  -2.0f,  -2.0f,  -1.0f,   0.0f,
              1.0f,   3.0f,   5.0f,   8.0f,  12.0f,  16.0f,  22.0f,  30.0f
         }};
 
         // 40 phon: moderate listening level - moderate bass/treble boost
-        contourTables[1] = {{
+        contourTables[static_cast<int>(Preset::Smile_40Phon)] = {{
             28.0f,  20.0f,  14.0f,  10.0f,   7.0f,   5.0f,   3.0f,   2.0f,
              1.0f,   0.0f,  -1.0f,  -1.5f,  -1.5f,  -1.0f,  -0.5f,   0.0f,
              0.5f,   1.5f,   3.0f,   5.0f,   8.0f,  12.0f,  18.0f,  25.0f
         }};
 
         // 60 phon: comfortable listening - mild bass/treble boost
-        contourTables[2] = {{
+        contourTables[static_cast<int>(Preset::Smile_60Phon)] = {{
             18.0f,  12.0f,   8.0f,   5.0f,   3.0f,   2.0f,   1.0f,   0.5f,
              0.0f,   0.0f,  -0.5f,  -1.0f,  -1.0f,  -0.5f,   0.0f,   0.0f,
              0.5f,   1.0f,   2.0f,   3.0f,   5.0f,   8.0f,  13.0f,  19.0f
         }};
 
         // 80 phon: loud listening - nearly flat
-        contourTables[3] = {{
+        contourTables[static_cast<int>(Preset::Smile_80Phon)] = {{
             10.0f,   6.0f,   3.0f,   1.5f,   0.5f,   0.0f,   0.0f,   0.0f,
              0.0f,   0.0f,   0.0f,  -0.5f,  -0.5f,   0.0f,   0.0f,   0.0f,
              0.0f,   0.5f,   1.0f,   1.5f,   3.0f,   5.0f,   8.0f,  12.0f
         }};
 
         // Flat: no contour adjustment
-        contourTables[4] = {{
+        contourTables[static_cast<int>(Preset::Flat)] = {{
             0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
             0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
             0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f
         }};
     }
 
-    Preset currentPreset = Preset::ISO226_40Phon;
+    /**
+     * Pre-compute ISO 226 contours for the 24 Bark band center frequencies.
+     * Uses Iso226::byGivenFreqs() and normalizes so the minimum value is 0.0.
+     */
+    void computeIso226Contours() {
+        // Convert Bark band center frequencies to double for Iso226
+        std::array<double, NUM_BARK_BANDS> freqs;
+        for (int i = 0; i < NUM_BARK_BANDS; ++i) {
+            freqs[i] = static_cast<double>(barkBandCenterFreqs[i]);
+        }
+
+        // Temporary buffers for computation
+        std::array<double, NUM_BARK_BANDS> contourBuffer;
+        std::array<float, NUM_BARK_BANDS> normalizedContour;
+
+        // Compute and normalize contours for each phon level
+        for (int phon : {20, 40, 60, 80}) {
+            // Compute raw contour using Iso226
+            Iso226::byGivenFreqs(static_cast<double>(phon), freqs, contourBuffer);
+
+            // Convert to float and find minimum value
+            float minVal = contourBuffer[0];
+            for (int i = 1; i < NUM_BARK_BANDS; ++i) {
+                normalizedContour[i] = static_cast<float>(contourBuffer[i]);
+                if (normalizedContour[i] < minVal) {
+                    minVal = normalizedContour[i];
+                }
+            }
+            normalizedContour[0] = static_cast<float>(contourBuffer[0]);
+
+            // Normalize so minimum value is 0.0
+            for (int i = 0; i < NUM_BARK_BANDS; ++i) {
+                normalizedContour[i] = normalizedContour[i] - minVal;
+            }
+
+            // Store in contourTables
+            Preset preset;
+            switch (phon) {
+                case 20: preset = Preset::ISO226_20Phon; break;
+                case 40: preset = Preset::ISO226_40Phon; break;
+                case 60: preset = Preset::ISO226_60Phon; break;
+                case 80: preset = Preset::ISO226_80Phon; break;
+                default: continue;
+            }
+            for (int i = 0; i < NUM_BARK_BANDS; ++i) {
+                contourTables[static_cast<int>(preset)][i] = normalizedContour[i];
+            }
+        }
+    }
+
+    Preset currentPreset = Preset::Smile_40Phon;
     static constexpr int kNumContourPresets = static_cast<int>(Preset::NumPresets);
     std::array<std::array<float, NUM_BARK_BANDS>, kNumContourPresets> contourTables{};
 };
