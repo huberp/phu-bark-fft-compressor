@@ -60,7 +60,7 @@ jobs:
       - name: Cache Intel MKL NuGet package
         if: ${{ inputs.arch == 'x64' }}
         id: cache-mkl
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}\mkl_pkg
           key: intel-mkl-nuget-${{ env.MKL_NUGET_VERSION }}-win-x64
