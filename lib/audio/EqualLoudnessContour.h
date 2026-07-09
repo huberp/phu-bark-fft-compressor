@@ -167,29 +167,17 @@ class EqualLoudnessContour {
 
         // Temporary buffers for computation
         std::array<double, NUM_BARK_BANDS> contourBuffer;
-        std::array<float, NUM_BARK_BANDS> normalizedContour;
 
         // Compute and normalize contours for each phon level
         for (int phon : {20, 40, 60, 80}) {
             // Compute raw contour using Iso226
             Iso226::byGivenFreqs(static_cast<double>(phon), freqs, contourBuffer);
 
-            // Convert to float and find minimum value
-            float minVal = contourBuffer[0];
-            for (int i = 1; i < NUM_BARK_BANDS; ++i) {
-                normalizedContour[i] = static_cast<float>(contourBuffer[i]);
-                if (normalizedContour[i] < minVal) {
-                    minVal = normalizedContour[i];
-                }
-            }
-            normalizedContour[0] = static_cast<float>(contourBuffer[0]);
+            // Find minimum value
+            auto minIt = std::min_element(contourBuffer.begin(), contourBuffer.end());
+            double minVal = *minIt;
 
-            // Normalize so minimum value is 0.0
-            for (int i = 0; i < NUM_BARK_BANDS; ++i) {
-                normalizedContour[i] = normalizedContour[i] - minVal;
-            }
-
-            // Store in contourTables
+            // Store in contourTables with normalization applied
             Preset preset;
             switch (phon) {
                 case 20: preset = Preset::ISO226_20Phon; break;
@@ -198,9 +186,13 @@ class EqualLoudnessContour {
                 case 80: preset = Preset::ISO226_80Phon; break;
                 default: continue;
             }
-            for (int i = 0; i < NUM_BARK_BANDS; ++i) {
-                contourTables[static_cast<int>(preset)][i] = normalizedContour[i];
-            }
+            
+            // Transform: copy from contourBuffer to contourTables and normalize in one pass
+            std::transform(
+                contourBuffer.begin(), contourBuffer.end(),
+                contourTables[static_cast<int>(preset)].begin(),
+                [minVal](double val) { return static_cast<float>(val - minVal); }
+            );
         }
     }
 
