@@ -9,8 +9,8 @@ JUCE audio-plugin project for Bark-band FFT compression with an integrated trans
   - `sudo bash scripts/install-linux-deps.sh`
   - `cmake --preset linux-x64-vst3-release`
   - `cmake --build --preset linux-x64-vst3-release-build`
-- Windows x64 VST3 release (PowerShell):
-  - `.\scripts\find-cmake.ps1`
+- Windows x64 VST3 release (PowerShell, Visual Studio 18 2026 generator):
+  - Run `.\scripts\find-cmake.ps1`; use the reported `cmake.exe` path if `cmake` is not already on `PATH`
   - `cmake --preset windows-x64-vst3-release`
   - `cmake --build --preset windows-x64-vst3-release-build`
 - Optional Intel MKL FFT acceleration: set `MKLROOT`; disable with `-DUSE_INTEL_MKL=OFF`
