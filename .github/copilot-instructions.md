@@ -1,40 +1,33 @@
 # Instructions for GitHub Copilot
 
-## Building This Project
-This is a JUCE-based audio plugin project (VST3 Bark-band FFT compressor).
+JUCE audio-plugin project for Bark-band FFT compression with an integrated transient shaper.
 
-### Before Building on Linux
-1. Install dependencies: `sudo bash scripts/install-linux-deps.sh`
-2. Initialize submodules: `git submodule update --init --recursive`
-3. Use Linux preset: `cmake --preset linux-release && cmake --build --preset linux-build`
-
-### Before Building on Windows (PowerShell)
-1. Initialize submodules: `git submodule update --init --recursive`
-2. Find cmake executable with script .\scripts\find-cmake.ps1. Don't try to use cmake without this step, as it may not be in your PATH.
-3. Configure: `cmake --preset vs2026-x64`
-4. Build: `cmake --build --preset release`
-
-### Build Timeouts
-- Use fewer parallel jobs on CI: `cmake --build --preset linux-build -j2`
-- Ensure all dependencies installed before attempting build
-- JUCE submodule must be fully initialized
+## Build
+- Initialize submodules first: `git submodule update --init --recursive`
+- Presets live in `CMakePresets.json` and follow `<os>-<arch>-<format>-<config>` with matching `-build` presets
+- Linux x64 VST3 release:
+  - `sudo bash scripts/install-linux-deps.sh`
+  - `cmake --preset linux-x64-vst3-release`
+  - `cmake --build --preset linux-x64-vst3-release-build`
+- Windows x64 VST3 release (PowerShell):
+  - `.\scripts\find-cmake.ps1`
+  - `cmake --preset windows-x64-vst3-release`
+  - `cmake --build --preset windows-x64-vst3-release-build`
+- Optional Intel MKL FFT acceleration: set `MKLROOT`; disable with `-DUSE_INTEL_MKL=OFF`
+- If builds time out, reduce parallelism, e.g. `cmake --build --preset linux-x64-vst3-release-build -j2`
+- No standalone test suite is configured; validate changes with the relevant configure/build preset
 
 ## Architecture
-- **lib/audio/BarkFFTCompressor.h** — Header-only FFT-based compressor DSP
-  - 2048-point FFT with 50% overlap-add Hann window
-  - 24 Bark bands mapped from FFT bins
-  - Equal-loudness contour presets (ISO 226: 20/40/60/80 phon + flat)
-  - Per-band compression with threshold/ratio/attack/release
-- **lib/audio/AudioSampleFifo.h** — Lock-free FIFO for audio→UI sample transport
-- **lib/audio/FFTProcessor.h** — UI-thread FFT processor for spectrum visualization
-- **src/PluginProcessor** — JUCE AudioProcessor wrapper with APVTS parameters
-- **src/PluginEditor** — Minimal UI with spectrum display, gain reduction meters, sliders
-- **src/SpectrumDisplay** — FFT spectrum with Bark band overlays and contour display
+- `lib/audio/BarkFFTCompressor.h` — header-only spectral compressor with Precision/Transient FFT modes, 24 Bark bands, ISO 226 contour thresholds, and 50% overlap-add reconstruction
+- `lib/audio/TransientShaper.h` — header-only transient processor applied after compression
+- `lib/audio/AudioSampleFifo.h` — lock-free audio-to-UI sample transport
+- `src/PluginProcessor.*` — JUCE `AudioProcessor` + APVTS, owns DSP chain and FIFOs
+- `src/PluginEditor.*` — UI layout, timer-driven updates, parameter attachments
+- `src/SpectrumDisplay.*` — spectrum, Bark overlays, contour, and gain-reduction display
 
 ## Conventions
-- C++17, no template wizardry
-- Header-only library code in lib/ (no plugin/UI dependencies)
-- Lock-free communication between audio and UI threads (AudioSampleFifo)
-- No memory allocation, system calls, or locks on audio thread
-- JUCE APVTS for parameter management
-- CMake with presets for cross-platform builds
+- C++20
+- Keep DSP code in `lib/` header-only and free of JUCE/UI dependencies
+- No allocation, locks, or system calls on the audio thread
+- Use lock-free audio/UI communication only
+- Use JUCE APVTS for parameter state; audio-thread reads should stay lock-free
