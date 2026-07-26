@@ -59,12 +59,17 @@ PhuBarkFFTCompressorAudioProcessor::createParameterLayout() {
         juce::ParameterID{PARAM_CONTOUR, 1},
         "Loudness Contour",
         juce::StringArray{
+            // Ordered to match ContourPreset enum values (index == enum int)
+            BarkFFTCompressor::getContourPresetName(BarkFFTCompressor::ContourPreset::Smile_20Phon),
+            BarkFFTCompressor::getContourPresetName(BarkFFTCompressor::ContourPreset::Smile_40Phon),
+            BarkFFTCompressor::getContourPresetName(BarkFFTCompressor::ContourPreset::Smile_60Phon),
+            BarkFFTCompressor::getContourPresetName(BarkFFTCompressor::ContourPreset::Smile_80Phon),
             BarkFFTCompressor::getContourPresetName(BarkFFTCompressor::ContourPreset::ISO226_20Phon),
             BarkFFTCompressor::getContourPresetName(BarkFFTCompressor::ContourPreset::ISO226_40Phon),
             BarkFFTCompressor::getContourPresetName(BarkFFTCompressor::ContourPreset::ISO226_60Phon),
             BarkFFTCompressor::getContourPresetName(BarkFFTCompressor::ContourPreset::ISO226_80Phon),
             BarkFFTCompressor::getContourPresetName(BarkFFTCompressor::ContourPreset::Flat)},
-        1)); // Default: 40 phon
+        1)); // Default: Smile_40Phon (index == enum value)
 
     // ── FFT Mode ─────────────────────────────────────────────────────────
     params.push_back(std::make_unique<juce::AudioParameterChoice>(

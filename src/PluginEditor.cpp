@@ -210,21 +210,16 @@ PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioP
     contourLabel.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(contourLabel);
 
-    contourCombo.addItem(
-        phu::audio::BarkFFTCompressor::getContourPresetName(
-            phu::audio::BarkFFTCompressor::ContourPreset::ISO226_20Phon), 1);
-    contourCombo.addItem(
-        phu::audio::BarkFFTCompressor::getContourPresetName(
-            phu::audio::BarkFFTCompressor::ContourPreset::ISO226_40Phon), 2);
-    contourCombo.addItem(
-        phu::audio::BarkFFTCompressor::getContourPresetName(
-            phu::audio::BarkFFTCompressor::ContourPreset::ISO226_60Phon), 3);
-    contourCombo.addItem(
-        phu::audio::BarkFFTCompressor::getContourPresetName(
-            phu::audio::BarkFFTCompressor::ContourPreset::ISO226_80Phon), 4);
-    contourCombo.addItem(
-        phu::audio::BarkFFTCompressor::getContourPresetName(
-            phu::audio::BarkFFTCompressor::ContourPreset::Flat), 5);
+    // Populate contour presets in enum order so that item ID - 1 == ContourPreset int value.
+    // This keeps the APVTS choice index aligned with the enum, which the processor casts directly.
+    {
+        const int numPresets = static_cast<int>(phu::audio::BarkFFTCompressor::ContourPreset::NumPresets);
+        for (int i = 0; i < numPresets; ++i)
+        {
+            auto preset = static_cast<phu::audio::BarkFFTCompressor::ContourPreset>(i);
+            contourCombo.addItem(phu::audio::BarkFFTCompressor::getContourPresetName(preset), i + 1);
+        }
+    }
     addAndMakeVisible(contourCombo);
     contourAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_CONTOUR,
