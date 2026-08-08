@@ -18,21 +18,6 @@ target_sources(phu-bark-fft-compressor PRIVATE
     SpectrumDisplay.h
 )
 
-target_compile_definitions(phu-bark-fft-compressor
-    PUBLIC
-        JUCE_WEB_BROWSER=0
-        JUCE_USE_CURL=0
-        JUCE_VST3_CAN_REPLACE_VST2=0
-        JUCE_USE_CAMERA=0
-        JUCE_USE_MP3AUDIOFORMAT=0
-        JUCE_USE_OGGVORBIS=0
-        JUCE_USE_FLAC=0
-)
-
-if(WIN32)
-    target_compile_definitions(phu-bark-fft-compressor PUBLIC NOMINMAX)
-endif()
-
 target_link_libraries(phu-bark-fft-compressor
     PRIVATE
         BarkCompressorLib
