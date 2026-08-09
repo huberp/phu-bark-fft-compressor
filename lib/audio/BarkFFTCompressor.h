@@ -112,12 +112,11 @@ class BarkFFTCompressor {
         binToBand       .assign(currentNumBins, 0);
         binGains        .assign(currentNumBins, 1.0f);
         binLogFreq      .assign(currentNumBins, 0.0f);
-        inputRingMono .assign(ringSize, 0.0f);
         inputRingL    .assign(ringSize, 0.0f);
         inputRingR    .assign(ringSize, 0.0f);
         outputRingL   .assign(ringSize, 0.0f);
         outputRingR   .assign(ringSize, 0.0f);
-        fftBuffer     .assign(ringSize, 0.0f);
+        fftBufferMono .assign(ringSize, 0.0f);
         fftBufferL    .assign(ringSize, 0.0f);
         fftBufferR    .assign(ringSize, 0.0f);
 
@@ -126,12 +125,11 @@ class BarkFFTCompressor {
         // Verify 32-byte alignment of performance-critical buffers (debug only).
         jassert (reinterpret_cast<uintptr_t>(binGains.data())      % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(binLogFreq.data())    % 32 == 0);
-        jassert (reinterpret_cast<uintptr_t>(inputRingMono.data()) % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(inputRingL.data())    % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(inputRingR.data())    % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(outputRingL.data())   % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(outputRingR.data())   % 32 == 0);
-        jassert (reinterpret_cast<uintptr_t>(fftBuffer.data())     % 32 == 0);
+        jassert (reinterpret_cast<uintptr_t>(fftBufferMono.data()) % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(fftBufferL.data())    % 32 == 0);
         jassert (reinterpret_cast<uintptr_t>(fftBufferR.data())    % 32 == 0);
 
@@ -149,7 +147,6 @@ class BarkFFTCompressor {
      * Reset all internal state (call on transport restart, etc.).
      */
     void reset() {
-        std::fill(inputRingMono.begin(), inputRingMono.end(), 0.0f);
         std::fill(inputRingL.begin(),    inputRingL.end(),    0.0f);
         std::fill(inputRingR.begin(),    inputRingR.end(),    0.0f);
         std::fill(outputRingL.begin(),   outputRingL.end(),   0.0f);
@@ -210,14 +207,12 @@ class BarkFFTCompressor {
     };
 
     StereoSample processSample(float inputL, float inputR) {
-        // Write both channels and their mono mix into the respective ring buffers.
-        // The mono mix is used for analysis (gain computation) only; the individual
-        // L/R rings are used for synthesis so per-band gains affect ONLY their own
-        // frequency band — no cross-band pumping.
+        // Write both channels into their respective ring buffers. The mono analysis
+        // spectrum is derived later from the channel spectra, so no extra mono input
+        // ring is needed here.
         const int ringSize = currentFFTSize * 2;
-        inputRingMono[ringWritePos] = (inputL + inputR) * 0.5f;
-        inputRingL[ringWritePos]    = inputL;
-        inputRingR[ringWritePos]    = inputR;
+        inputRingL[ringWritePos] = inputL;
+        inputRingR[ringWritePos] = inputR;
 
         // Read the OLA-reconstructed output for this position (written by past frames)
         float outL = outputRingL[ringWritePos];
@@ -434,54 +429,60 @@ class BarkFFTCompressor {
     /** Process one FFT frame: analysis → per-band gain computation → stereo synthesis via OLA.
      *
      * Signal path:
-     *   1. Analysis: forward FFT of the mono mix → compute per-band gains.
-     *   2. Synthesis L: forward FFT of L → apply per-band gains → IFFT → OLA.
-     *   3. Synthesis R: same as step 2 but for the R channel.
+     *   1. Analysis prep: forward FFT of L and R, then derive a mono spectrum by averaging them.
+     *   2. Analysis: compute per-band gains from that mono spectrum.
+     *   3. Synthesis L: apply per-band gains to the retained L spectrum → IFFT → OLA.
+     *   4. Synthesis R: same as step 3 but for the R spectrum.
      *
-     * Gain reduction is computed from the mono mix (sufficient for level-dependent
+     * Gain reduction is computed from the mono-average spectrum (sufficient for level-dependent
      * processing) while each channel is synthesised independently.
      */
     void processFFTFrame() {
-        // ── Step 1: Analysis ─────────────────────────────────────────────
-        // Window + FFT on the mono mix to compute per-band compression gains.
         const int ringSize = currentFFTSize * 2;
-        
-        // Split-at-wrap ring buffer copy (SIMD-friendly)
-        const int startIdx = (ringWritePos - currentFFTSize + ringSize) % ringSize;
-        const int firstLen = ringSize - startIdx;
-        if (firstLen >= currentFFTSize) {
-            // No wrap: single contiguous copy
-            juce::FloatVectorOperations::copy(fftBuffer.data(), inputRingMono.data() + startIdx, currentFFTSize);
-        } else {
-            // Wraps: two segments
-            juce::FloatVectorOperations::copy(fftBuffer.data(), inputRingMono.data() + startIdx, firstLen);
-            juce::FloatVectorOperations::copy(fftBuffer.data() + firstLen, inputRingMono.data(), currentFFTSize - firstLen);
-        }
-        
-        // Apply Hann window (SIMD)
-        olaWindow->applyForFFTInPlace(fftBuffer.data());
-        
-        // Zero-pad second half for real FFT
-        juce::FloatVectorOperations::clear(fftBuffer.data() + currentFFTSize, currentFFTSize);
+        const int spectrumSize = currentNumBins * 2;
 
-        fft->performRealOnlyForwardTransform(fftBuffer.data());
+        auto prepareChannelSpectrum = [&](const phu::memory::AlignedVector<float>& inRing,
+                                          phu::memory::AlignedVector<float>& spectrumBuffer) {
+            const int startIdx = (ringWritePos - currentFFTSize + ringSize) % ringSize;
+            const int firstLen = ringSize - startIdx;
+            if (firstLen >= currentFFTSize) {
+                juce::FloatVectorOperations::copy(spectrumBuffer.data(), inRing.data() + startIdx, currentFFTSize);
+            } else {
+                juce::FloatVectorOperations::copy(spectrumBuffer.data(), inRing.data() + startIdx, firstLen);
+                juce::FloatVectorOperations::copy(spectrumBuffer.data() + firstLen, inRing.data(),
+                                                  currentFFTSize - firstLen);
+            }
+
+            olaWindow->applyForFFTInPlace(spectrumBuffer.data());
+            juce::FloatVectorOperations::clear(spectrumBuffer.data() + currentFFTSize, currentFFTSize);
+            fft->performRealOnlyForwardTransform(spectrumBuffer.data());
+        };
+
+        // ── Step 1: Prepare L/R spectra and derive mono analysis spectrum ──
+        prepareChannelSpectrum(inputRingL, fftBufferL);
+        prepareChannelSpectrum(inputRingR, fftBufferR);
+
+        juce::FloatVectorOperations::copy(fftBufferMono.data(), fftBufferL.data(), spectrumSize);
+        juce::FloatVectorOperations::add(fftBufferMono.data(), fftBufferR.data(), spectrumSize);
+        juce::FloatVectorOperations::multiply(fftBufferMono.data(), 0.5f, spectrumSize);
 
         // Accumulate POWER per Bark band - using sqrt here is not necessary.
         // we use power later to convert to dB, so we can save some CPU by skipping the sqrt and working with power directly.
         std::array<float, NUM_BARK_BANDS> barkEnergies{};
         // the following two loops are split on purpose to allow the compiler use simd instructions for the first loop 
         // without worrying about the band accumulation in the second loop.
-        // first individually square each number in the fftBuffer, then accumulate into barkEnergies 
-        // the fftBuffer contains interleaved real and imaginary parts of the FFT output: [Re(0), Im(0), Re(1), Im(1), ..., Re(N/2-1), Im(N/2-1)]
+        // first individually square each value in the mono spectrum buffer, then accumulate into barkEnergies 
+        // the mono spectrum buffer contains interleaved real and imaginary parts of the FFT output:
+        // [Re(0), Im(0), Re(1), Im(1), ..., Re(N/2-1), Im(N/2-1)]
         for (int k = 0; k < currentNumBins*2; ++k)
         {
-            const auto num = fftBuffer[k];
-            fftBuffer[k] = num * num;
+            const auto num = fftBufferMono[k];
+            fftBufferMono[k] = num * num;
         }
         // next accumulate the power of each bin into the corresponding Bark band
         for (int k = 0; k < currentNumBins; ++k)
         {   
-            const auto power = fftBuffer[k*2] + fftBuffer[k*2+1];
+            const auto power = fftBufferMono[k*2] + fftBufferMono[k*2+1];
             barkEnergies[binToBand[k]] += power;
         }
 
@@ -630,52 +631,32 @@ class BarkFFTCompressor {
         //   75% overlap (hop=N/4): sum = 2.0 → olaScaleFactor = 0.5
         // The olaScaleFactor compensates for the non-unity COLA sum at higher overlap.
 
-        auto synthesiseChannel = [&](const phu::memory::AlignedVector<float>& inRing,
-                                     phu::memory::AlignedVector<float>& outRing,
-                                     phu::memory::AlignedVector<float>& buf) {
-            // Split-at-wrap ring buffer copy (SIMD-friendly)
-            const int startIdx = (ringWritePos - currentFFTSize + ringSize) % ringSize;
-            const int firstLen = ringSize - startIdx;
-            if (firstLen >= currentFFTSize) {
-                // No wrap: single contiguous copy
-                juce::FloatVectorOperations::copy(buf.data(), inRing.data() + startIdx, currentFFTSize);
-            } else {
-                // Wraps: two segments
-                juce::FloatVectorOperations::copy(buf.data(), inRing.data() + startIdx, firstLen);
-                juce::FloatVectorOperations::copy(buf.data() + firstLen, inRing.data(), currentFFTSize - firstLen);
-            }
-            
-            // Apply Hann window (SIMD)
-            olaWindow->applyForFFTInPlace(buf.data());
-            
-            // Zero-pad second half for real FFT
-            juce::FloatVectorOperations::clear(buf.data() + currentFFTSize, currentFFTSize);
-
-            fft->performRealOnlyForwardTransform(buf.data());
-
+        auto synthesiseChannel = [&](phu::memory::AlignedVector<float>& outRing,
+                                     phu::memory::AlignedVector<float>& spectrumBuffer) {
             for (int k = 0; k < currentNumBins; ++k) {
                 float g = binGains[k];
-                buf[k * 2]     *= g;
-                buf[k * 2 + 1] *= g;
+                spectrumBuffer[k * 2]     *= g;
+                spectrumBuffer[k * 2 + 1] *= g;
             }
 
-            fft->performRealOnlyInverseTransform(buf.data());
+            fft->performRealOnlyInverseTransform(spectrumBuffer.data());
 
             // OLA: accumulate IFFT output with COLA scale (SIMD)
             const int outStartIdx = (ringWritePos - currentFFTSize + ringSize) % ringSize;
             const int outFirstLen = ringSize - outStartIdx;
             if (outFirstLen >= currentFFTSize) {
                 // No wrap: single accumulation
-                olaWindow->applyAndAccumulate(buf.data(), outRing.data() + outStartIdx, currentFFTSize);
+                olaWindow->applyAndAccumulate(spectrumBuffer.data(), outRing.data() + outStartIdx, currentFFTSize);
             } else {
                 // Wraps: two accumulations
-                olaWindow->applyAndAccumulate(buf.data(), outRing.data() + outStartIdx, outFirstLen);
-                olaWindow->applyAndAccumulate(buf.data() + outFirstLen, outRing.data(), currentFFTSize - outFirstLen);
+                olaWindow->applyAndAccumulate(spectrumBuffer.data(), outRing.data() + outStartIdx, outFirstLen);
+                olaWindow->applyAndAccumulate(spectrumBuffer.data() + outFirstLen, outRing.data(),
+                                              currentFFTSize - outFirstLen);
             }
         };
 
-        synthesiseChannel(inputRingL, outputRingL, fftBufferL);
-        synthesiseChannel(inputRingR, outputRingR, fftBufferR);
+        synthesiseChannel(outputRingL, fftBufferL);
+        synthesiseChannel(outputRingR, fftBufferR);
     }
 
     // ── FFT engine ───────────────────────────────────────────────────────
@@ -739,10 +720,8 @@ class BarkFFTCompressor {
 
     // ── Overlap-add ring buffers (size = currentFFTSize * 2) ─────────────
     //
-    // Mono mix is used for analysis only.  L/R have independent synthesis
-    // paths so per-band gains affect only the corresponding frequency range
-    // in each channel (no cross-band pumping).
-    phu::memory::AlignedVector<float> inputRingMono;
+    // L/R have independent synthesis paths so per-band gains affect only the
+    // corresponding frequency range in each channel (no cross-band pumping).
     phu::memory::AlignedVector<float> inputRingL;
     phu::memory::AlignedVector<float> inputRingR;
     phu::memory::AlignedVector<float> outputRingL;
@@ -752,10 +731,10 @@ class BarkFFTCompressor {
 
     // ── FFT workspace (size = currentFFTSize * 2) ────────────────────────
     //
-    // fftBuffer  — analysis (mono mix)
-    // fftBufferL — synthesis channel L
-    // fftBufferR — synthesis channel R
-    phu::memory::AlignedVector<float> fftBuffer;
+    // fftBufferMono — analysis spectrum derived from the transformed L/R spectra
+    // fftBufferL    — transformed synthesis channel L
+    // fftBufferR    — transformed synthesis channel R
+    phu::memory::AlignedVector<float> fftBufferMono;
     phu::memory::AlignedVector<float> fftBufferL;
     phu::memory::AlignedVector<float> fftBufferR;
 
