@@ -434,7 +434,7 @@ class BarkFFTCompressor {
      *   3. Synthesis L: apply per-band gains to the retained L spectrum → IFFT → OLA.
      *   4. Synthesis R: same as step 3 but for the R spectrum.
      *
-     * Gain reduction is computed from the mono mix (sufficient for level-dependent
+     * Gain reduction is computed from the mono-average spectrum (sufficient for level-dependent
      * processing) while each channel is synthesised independently.
      */
     void processFFTFrame() {
@@ -471,7 +471,7 @@ class BarkFFTCompressor {
         std::array<float, NUM_BARK_BANDS> barkEnergies{};
         // the following two loops are split on purpose to allow the compiler use simd instructions for the first loop 
         // without worrying about the band accumulation in the second loop.
-        // first individually square each number in the fftBuffer, then accumulate into barkEnergies 
+        // first individually square each value in the mono spectrum buffer, then accumulate into barkEnergies 
         // the mono spectrum buffer contains interleaved real and imaginary parts of the FFT output:
         // [Re(0), Im(0), Re(1), Im(1), ..., Re(N/2-1), Im(N/2-1)]
         for (int k = 0; k < currentNumBins*2; ++k)
