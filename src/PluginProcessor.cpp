@@ -1,6 +1,23 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+namespace {
+BarkFFTCompressor::OverlapMode overlapModeFromIndex(int index) {
+    static constexpr BarkFFTCompressor::OverlapMode overlapModes[] = {
+        BarkFFTCompressor::OverlapMode::Half,
+        BarkFFTCompressor::OverlapMode::ThreeQuarter,
+        BarkFFTCompressor::OverlapMode::Ninety
+    };
+
+    const int clamped = juce::jlimit(0, static_cast<int>(std::size(overlapModes)) - 1, index);
+    return overlapModes[clamped];
+}
+
+int clampedOverlapModeIndex(int index) {
+    return juce::jlimit(0, 2, index);
+}
+} // namespace
+
 PhuBarkFFTCompressorAudioProcessor::PhuBarkFFTCompressorAudioProcessor()
     : AudioProcessor(BusesProperties()
                          .withInput("Input", juce::AudioChannelSet::stereo(), true)
@@ -130,14 +147,9 @@ void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int /*
     m_compressor.setFFTMode(fftModeIndex == 0 ? BarkFFTCompressor::FFTMode::Precision
                                               : BarkFFTCompressor::FFTMode::Transient);
 
-    const int overlapModeIndex = static_cast<int>(overlapModeParam->load());
+    const int overlapModeIndex = clampedOverlapModeIndex(static_cast<int>(overlapModeParam->load()));
     lastOverlapModeIndex = overlapModeIndex;
-    static const BarkFFTCompressor::OverlapMode overlapModes[] = {
-        BarkFFTCompressor::OverlapMode::Half,
-        BarkFFTCompressor::OverlapMode::ThreeQuarter,
-        BarkFFTCompressor::OverlapMode::Ninety
-    };
-    m_compressor.setOverlapMode(overlapModes[overlapModeIndex]);
+    m_compressor.setOverlapMode(overlapModeFromIndex(overlapModeIndex));
 
     m_compressor.prepare(sampleRate);
 
@@ -197,13 +209,11 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
     }
 
     // ── Overlap mode change detection ─────────────────────────────────────
-    const int overlapModeIndex = static_cast<int>(overlapModeParam->load());
+    const int overlapModeIndex = clampedOverlapModeIndex(static_cast<int>(overlapModeParam->load()));
     if (overlapModeIndex != lastOverlapModeIndex) {
         lastOverlapModeIndex = overlapModeIndex;
-        m_compressor.setOverlapMode(overlapModeIndex == 0 ? BarkFFTCompressor::OverlapMode::Half
-                                                          : BarkFFTCompressor::OverlapMode::ThreeQuarter);
+        m_compressor.setOverlapMode(overlapModeFromIndex(overlapModeIndex));
         m_compressor.prepare(getSampleRate());
-        setLatencySamples(m_compressor.getLatencySamples());
     }
 
     // Update compressor parameters from APVTS (lock-free atomic reads)

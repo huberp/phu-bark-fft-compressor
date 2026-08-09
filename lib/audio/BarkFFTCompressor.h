@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <algorithm>
 #include <cmath>
 #include <vector>
 #include <juce_dsp/juce_dsp.h>
@@ -28,6 +29,8 @@ namespace audio {
 class BarkFFTCompressor {
   public:
     static constexpr int NUM_BARK_BANDS = 24;
+        static constexpr float MAX_SUPPORTED_SAMPLE_RATE_HZ = 192000.0f;
+        static constexpr int MAX_FFT_SIZE = 8192;
 
     // FFT mode: Precision uses a larger FFT (better frequency resolution);
     // Transient uses a smaller FFT (better transient response).
@@ -43,8 +46,7 @@ class BarkFFTCompressor {
     using ContourPreset = EqualLoudnessContour::Preset;
 
     BarkFFTCompressor() {
-        // Allocate FFT engine for the default mode (Precision, 44.1 kHz → order 11)
-        fft = std::make_unique<juce::dsp::FFT>(11);
+        initialisePreallocatedState();
     }
 
     // ── FFT mode ─────────────────────────────────────────────────────────
@@ -79,21 +81,21 @@ class BarkFFTCompressor {
      */
     void prepare(double sampleRate) {
         currentSampleRate = static_cast<float>(sampleRate);
+        if (!(currentSampleRate > 0.0f))
+            currentSampleRate = 44100.0f;
+        currentSampleRate = std::min(currentSampleRate, MAX_SUPPORTED_SAMPLE_RATE_HZ);
 
         // Compute runtime FFT parameters from the current mode and sample rate.
         currentFFTSize  = computeFFTSize(currentFFTMode, currentSampleRate);
+        currentFFTSize = std::min(currentFFTSize, MAX_FFT_SIZE);
         currentFFTOrder = 0;
         // Count trailing shifts to find log2(currentFFTSize), e.g. 2048→11, 4096→12.
         { int sz = currentFFTSize; while (sz > 1) { ++currentFFTOrder; sz >>= 1; } }
         currentNumBins  = currentFFTSize / 2;
         
-        // Create OLA window with appropriate overlap factor
-        float overlapFactor = 0.5f;
-        if (currentOverlapMode == OverlapMode::ThreeQuarter)
-            overlapFactor = 0.75f;
-        else if (currentOverlapMode == OverlapMode::Ninety)
-            overlapFactor = 0.9f;
-        olaWindow = std::make_unique<OLAWindow>(currentFFTSize, overlapFactor);
+        // Select prebuilt OLA window for the active FFT size + overlap mode.
+        olaWindow = getPrebuiltWindow(currentFFTSize, currentOverlapMode);
+        jassert(olaWindow != nullptr);
         currentHopSize = olaWindow->getHopSize();
         olaScaleFactor = olaWindow->getScaleFactor();
 
@@ -103,22 +105,9 @@ class BarkFFTCompressor {
         // so that 0 dBFS → 0 dB, matching the user-visible threshold range (-60..0 dB).
         kFFTNormDb = 20.0f * std::log10(static_cast<float>(currentFFTSize) / 4.0f);
 
-        // (Re-)create the FFT engine if the order changed.
-        if (!fft || fft->getSize() != currentFFTSize)
-            fft = std::make_unique<juce::dsp::FFT>(currentFFTOrder);
-
-        // Resize all dynamic buffers.
-        const int ringSize = currentFFTSize * 2;
-        binToBand       .assign(currentNumBins, 0);
-        binGains        .assign(currentNumBins, 1.0f);
-        binLogFreq      .assign(currentNumBins, 0.0f);
-        inputRingL    .assign(ringSize, 0.0f);
-        inputRingR    .assign(ringSize, 0.0f);
-        outputRingL   .assign(ringSize, 0.0f);
-        outputRingR   .assign(ringSize, 0.0f);
-        fftBufferMono .assign(ringSize, 0.0f);
-        fftBufferL    .assign(ringSize, 0.0f);
-        fftBufferR    .assign(ringSize, 0.0f);
+        // Select prebuilt FFT object for the current order.
+        fft = getPrebuiltFFT(currentFFTOrder);
+        jassert(fft != nullptr && fft->getSize() == currentFFTSize);
 
 
 
@@ -147,10 +136,11 @@ class BarkFFTCompressor {
      * Reset all internal state (call on transport restart, etc.).
      */
     void reset() {
-        std::fill(inputRingL.begin(),    inputRingL.end(),    0.0f);
-        std::fill(inputRingR.begin(),    inputRingR.end(),    0.0f);
-        std::fill(outputRingL.begin(),   outputRingL.end(),   0.0f);
-        std::fill(outputRingR.begin(),   outputRingR.end(),   0.0f);
+        const int ringSize = currentFFTSize * 2;
+        std::fill(inputRingL.begin(),    inputRingL.begin() + ringSize,    0.0f);
+        std::fill(inputRingR.begin(),    inputRingR.begin() + ringSize,    0.0f);
+        std::fill(outputRingL.begin(),   outputRingL.begin() + ringSize,   0.0f);
+        std::fill(outputRingR.begin(),   outputRingR.begin() + ringSize,   0.0f);
         ringWritePos = 0;
         samplesUntilNextFFT = currentHopSize;
 
@@ -390,7 +380,7 @@ class BarkFFTCompressor {
         // between two points that are equally-spaced on a log-Hz axis gives
         // a perceptually smooth spectral envelope — exactly what an analogue
         // multiband processor produces at its crossover transitions.
-        binLogFreq.assign(currentNumBins, 0.0f);
+        std::fill(binLogFreq.begin(), binLogFreq.begin() + currentNumBins, 0.0f);
         constexpr float kLogFreqFloor = -0.30103f; // log10(0.5 Hz) — floor for DC/sub-Hz bins
         for (int k = 0; k < currentNumBins; ++k) {
             float binFreq = (static_cast<float>(k) * currentSampleRate)
@@ -661,7 +651,14 @@ class BarkFFTCompressor {
 
     // ── FFT engine ───────────────────────────────────────────────────────
 
-    std::unique_ptr<juce::dsp::FFT> fft;
+    static constexpr int kMinSupportedFFTOrder = 10; // 1024
+    static constexpr int kMaxSupportedFFTOrder = 13; // 8192
+    static constexpr int kNumSupportedFFTOrders = kMaxSupportedFFTOrder - kMinSupportedFFTOrder + 1;
+    static constexpr std::array<int, 4> kSupportedFFTSizes{1024, 2048, 4096, 8192};
+
+    std::array<std::unique_ptr<juce::dsp::FFT>, kNumSupportedFFTOrders> prebuiltFFTs;
+    std::array<std::array<std::unique_ptr<OLAWindow>, 3>, kSupportedFFTSizes.size()> prebuiltWindows;
+    juce::dsp::FFT* fft = nullptr;
 
     // ── Runtime FFT parameters (set in prepare()) ────────────────────────
 
@@ -693,8 +690,8 @@ class BarkFFTCompressor {
 
     // ── Pre-computed lookup tables (size depends on FFT mode) ────────────
 
-    std::unique_ptr<OLAWindow> olaWindow;  // Handles window generation and OLA operations
-    std::vector<int>   binToBand;     // [currentNumBins]
+    OLAWindow* olaWindow = nullptr;  // Points to prebuilt window selected in prepare()
+    std::vector<int>   binToBand;     // Preallocated at MAX_FFT_SIZE / 2, indexed to currentNumBins
     // Per-bin gain array. Populated each frame by log-frequency interpolation
     // (processFFTFrame step 2b), then optionally refined by the secondary IIR pass.
     phu::memory::AlignedVector<float> binGains;
@@ -737,6 +734,91 @@ class BarkFFTCompressor {
     phu::memory::AlignedVector<float> fftBufferMono;
     phu::memory::AlignedVector<float> fftBufferL;
     phu::memory::AlignedVector<float> fftBufferR;
+
+    static constexpr int overlapModeToIndex(OverlapMode mode) {
+        switch (mode) {
+            case OverlapMode::Half: return 0;
+            case OverlapMode::ThreeQuarter: return 1;
+            case OverlapMode::Ninety: return 2;
+            default: return 0;
+        }
+    }
+
+    static constexpr float overlapFactorFromMode(OverlapMode mode) {
+        switch (mode) {
+            case OverlapMode::Half: return 0.5f;
+            case OverlapMode::ThreeQuarter: return 0.75f;
+            case OverlapMode::Ninety: return 0.9f;
+            default: return 0.5f;
+        }
+    }
+
+    static constexpr int fftSizeToIndex(int fftSize) {
+        switch (fftSize) {
+            case 1024: return 0;
+            case 2048: return 1;
+            case 4096: return 2;
+            case 8192: return 3;
+            default: return -1;
+        }
+    }
+
+    juce::dsp::FFT* getPrebuiltFFT(int order) {
+        const int index = order - kMinSupportedFFTOrder;
+        if (index < 0 || index >= kNumSupportedFFTOrders)
+            return nullptr;
+        return prebuiltFFTs[static_cast<size_t>(index)].get();
+    }
+
+    OLAWindow* getPrebuiltWindow(int fftSize, OverlapMode mode) {
+        const int fftSizeIndex = fftSizeToIndex(fftSize);
+        if (fftSizeIndex < 0)
+            return nullptr;
+        return prebuiltWindows[static_cast<size_t>(fftSizeIndex)][static_cast<size_t>(overlapModeToIndex(mode))].get();
+    }
+
+    void initialisePreallocatedState() {
+        // Prebuild FFT engines once; prepare() only switches pointers.
+        for (int order = kMinSupportedFFTOrder; order <= kMaxSupportedFFTOrder; ++order) {
+            prebuiltFFTs[static_cast<size_t>(order - kMinSupportedFFTOrder)] =
+                std::make_unique<juce::dsp::FFT>(order);
+        }
+
+        // Prebuild OLA windows for every supported FFT size and overlap mode.
+        for (size_t sizeIndex = 0; sizeIndex < kSupportedFFTSizes.size(); ++sizeIndex) {
+            const int fftSize = kSupportedFFTSizes[sizeIndex];
+            for (int overlapIndex = 0; overlapIndex < 3; ++overlapIndex) {
+                const auto mode = static_cast<OverlapMode>(overlapIndex);
+                prebuiltWindows[sizeIndex][static_cast<size_t>(overlapIndex)] =
+                    std::make_unique<OLAWindow>(fftSize, overlapFactorFromMode(mode));
+            }
+        }
+
+        // Preallocate working buffers to maximum required size.
+        constexpr int maxNumBins = MAX_FFT_SIZE / 2;
+        constexpr int maxRingSize = MAX_FFT_SIZE * 2;
+        binToBand.assign(maxNumBins, 0);
+        binGains.assign(maxNumBins, 1.0f);
+        binLogFreq.assign(maxNumBins, 0.0f);
+        inputRingL.assign(maxRingSize, 0.0f);
+        inputRingR.assign(maxRingSize, 0.0f);
+        outputRingL.assign(maxRingSize, 0.0f);
+        outputRingR.assign(maxRingSize, 0.0f);
+        fftBufferMono.assign(maxRingSize, 0.0f);
+        fftBufferL.assign(maxRingSize, 0.0f);
+        fftBufferR.assign(maxRingSize, 0.0f);
+
+        // Start with a valid default config so process can run before first explicit prepare.
+        fft = getPrebuiltFFT(currentFFTOrder);
+        olaWindow = getPrebuiltWindow(currentFFTSize, currentOverlapMode);
+        jassert(fft != nullptr);
+        jassert(olaWindow != nullptr);
+        currentHopSize = olaWindow->getHopSize();
+        olaScaleFactor = olaWindow->getScaleFactor();
+        computeBinToBarkMapping();
+        updateCoefficients();
+        reset();
+    }
 
 
 };
