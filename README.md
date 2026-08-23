@@ -30,7 +30,7 @@ A VST3 spectral compressor that operates independently on each of the 24 psychoa
 
 📐 **Equal-loudness contour threshold shaping** — the compression threshold follows an ISO 226 equal-loudness contour (20, 40, 60, or 80 phon) or a flat curve. The contour is shifted up or down by the **Contour Offset** parameter, giving a single musically meaningful control over how aggressively each frequency region is compressed relative to how the ear hears it.
 
-⚡ **Two FFT modes** — *Precision* mode uses a larger FFT window (2048 / 4096 samples) for fine frequency resolution; *Transient* mode uses a smaller window (1024 / 2048 samples) for tighter time-domain response. Both modes use 50% overlap-add with a periodic Hann window for transparent reconstruction.
+⚡ **Two FFT modes** — *Precision* mode uses a larger FFT window (2048 / 4096 samples) for fine frequency resolution; *Transient* mode uses a smaller window (1024 / 2048 samples) for tighter time-domain response. Both modes can be run with 50%, 75% or 90% overlap-add with a periodic Hann window for transparent reconstruction.
 
 🔎 **Integrated transient shaper** — a dual-envelope follower stage downstream of the compressor provides independent boost or cut of attack transients and sustained body (±24 dB each), with an adjustable detection sensitivity. The shaper can be bypassed independently.
 
@@ -64,6 +64,7 @@ A VST3 spectral compressor that operates independently on each of the 24 psychoa
 | Release | 1 … 2000 ms | Time for gain reduction to recover after a band falls below threshold. |
 | Loudness Contour | ISO 226 20/40/60/80 phon, Flat | Selects which equal-loudness curve shapes the per-band threshold. Lower-phon curves compress high and low frequencies more aggressively (matching the ear's reduced sensitivity at those frequencies). |
 | FFT Mode | Precision / Transient | Precision: larger FFT for better frequency resolution. Transient: smaller FFT for faster time response. |
+| Overlap  | 50%, 75% or 90% | Sets the overlap-add window for the FFT computations. Larger values provide better transient response while using mor CPU.
 | Smoothing Taps | 0 … 1 | IIR smoothing applied to per-band gain reduction updates, trading temporal response for stability. |
 
 **Transient Shaper group**
