@@ -616,10 +616,12 @@ class BarkFFTCompressor {
         // For each channel: window + FFT -> apply same per-band gains -> IFFT -> OLA.
         //
         // The Hann window is applied ONLY at the analysis stage (before FFT).
-        // No synthesis window is applied. The periodic Hann COLA sum is:
-        //   50% overlap (hop=N/2): sum = 1.0 → olaScaleFactor = 1.0
-        //   75% overlap (hop=N/4): sum = 2.0 → olaScaleFactor = 0.5
-        // The olaScaleFactor compensates for the non-unity COLA sum at higher overlap.
+        // No synthesis window is applied. The OLA scale factor compensates for
+        // the overlap sum of the reconstructed windowed frames:
+        //   50% overlap (hop=N/2): olaScaleFactor = 1.0
+        //   75% overlap (hop=N/4): olaScaleFactor = 0.5
+        //   90% overlap (hop=N/10): olaScaleFactor = 0.2
+        // This keeps the neutral path at unity gain when compression is inactive.
 
         auto synthesiseChannel = [&](phu::memory::AlignedVector<float>& outRing,
                                      phu::memory::AlignedVector<float>& spectrumBuffer) {
@@ -668,7 +670,7 @@ class BarkFFTCompressor {
     int currentFFTSize     = 2048;
     int currentNumBins     = 1024;
     int currentHopSize     = 1024;
-    float olaScaleFactor   = 1.0f;  // COLA normalisation: 1.0 at 50%, 0.5 at 75%
+    float olaScaleFactor   = 1.0f;  // COLA normalisation: 1.0 at 50%, 0.5 at 75%, 0.2 at 90%
     float kFFTNormDb       = 54.2f; // 20*log10(2048/4), updated in prepare()
 
     // ── Parameters ───────────────────────────────────────────────────────

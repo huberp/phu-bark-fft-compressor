@@ -21,11 +21,12 @@ namespace audio {
  *   window.applyAndAccumulate(ifftOutput, olaBuffer, numSamples);  // OLA synthesis (SIMD)
  *
  * COLA (Constant Overlap-Add) property:
- *   Periodic Hann window satisfies COLA at any hop size. The scale factor
- *   compensates for the window's overlap sum to maintain unity gain:
+ *   With analysis-only Hann windowing, the inverse FFT reconstructs the
+ *   windowed frame and the OLA scale factor must compensate for the sum of
+ *   overlapping windows to maintain unity gain:
  *     - 50% overlap (hop = N/2): sum = 1.0 → scale = 1.0
  *     - 75% overlap (hop = N/4): sum = 2.0 → scale = 0.5
- *     - 90% overlap (hop = N/10): sum = 10.0 → scale = 0.1
+ *     - 90% overlap (hop = N/10): sum = 5.0 → scale = 0.2
  *
  * Header-only, requires juce_dsp for FloatVectorOperations and AlignedAllocator.
  */
@@ -183,27 +184,19 @@ class OLAWindow {
     /**
      * Compute COLA scale factor.
      *
-     * For a periodic Hann window, the overlap-add sum at hop H is:
-     *   S = Σ w[n + kH] over k
+     * For the periodic Hann window used here, the overlap-add sum for the
+     * supported hop sizes is proportional to FFTSize / (2 * HopSize), so the
+     * unity-gain scale is:
+     *   scale = 2 * HopSize / FFTSize
      *
-     * The scale factor is chosen so that S * scale = 1.0 (unity gain).
-     *
-     * For Hann at 50% overlap (H = N/2): S ≈ 1.0 → scale = 1.0
-     * For Hann at 75% overlap (H = N/4): S ≈ 2.0 → scale = 0.5
-     * For Hann at 90% overlap (H = N/10): S ≈ 10.0 → scale = 0.1
-     *
-     * General formula: scale ≈ (1 - overlap) for Hann window.
+     * This yields the expected values for the supported modes:
+     *   50% overlap  → 1.0
+     *   75% overlap  → 0.5
+     *   90% overlap  → 0.2
      */
     void computeScaleFactor() {
-        // For periodic Hann, the COLA sum is approximately 1.0 / (1 - overlap)
-        // So the scale factor is (1 - overlap) to normalize back to unity gain.
-        m_scaleFactor = 1.0f - m_overlapFactor;
-
-        // For very high overlap (>87.5%), clamp to avoid tiny scale factors
-        // that could amplify quantization noise.
-        if (m_scaleFactor < 0.125f) {
-            m_scaleFactor = 0.125f;
-        }
+        // Normalize the analysis-only Hann OLA path back to unity gain.
+        m_scaleFactor = (2.0f * static_cast<float>(m_hopSize)) / static_cast<float>(m_fftSize);
 
         // Sanity check
         jassert(m_scaleFactor > 0.0f && m_scaleFactor <= 1.0f);

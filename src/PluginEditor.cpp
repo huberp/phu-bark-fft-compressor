@@ -250,7 +250,7 @@ PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioP
 
     overlapCombo.addItem("50% (Low CPU)", 1);
     overlapCombo.addItem("75% (High Quality)", 2);
-    overlapCombo.addItem("90% (High Quality)", 3);
+    overlapCombo.addItem("90% (Highest Quality)", 3);
     overlapCombo.setTooltip("Select between 50% overlap (lower CPU), "
                             "75% overlap (higher quality, 2x CPU cost) or "
                             "90% overlap (highest quality, 4x CPU cost).");
