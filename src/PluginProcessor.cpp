@@ -214,6 +214,7 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         lastOverlapModeIndex = overlapModeIndex;
         m_compressor.setOverlapMode(overlapModeFromIndex(overlapModeIndex));
         m_compressor.prepare(getSampleRate());
+        setLatencySamples(m_compressor.getLatencySamples());
     }
 
     // Update compressor parameters from APVTS (lock-free atomic reads)

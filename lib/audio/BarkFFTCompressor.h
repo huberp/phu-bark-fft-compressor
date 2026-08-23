@@ -280,8 +280,8 @@ class BarkFFTCompressor {
         return 0.0f;
     }
 
-    /** Get latency in samples (equals the current FFT size). */
-    int getLatencySamples() const { return currentFFTSize; }
+    /** Get reported latency in samples. Output delay is one full ring cycle regardless of hop size. */
+    int getLatencySamples() const { return currentFFTSize * 2; }
 
     /** Get the current contour preset. */
     ContourPreset getContourPreset() const { return contour.getPreset(); }

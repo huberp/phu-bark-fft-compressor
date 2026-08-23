@@ -214,10 +214,10 @@ Each band's threshold is the value of the selected ISO 226 contour at the band's
 
 | Mode | FFT size (≤48 kHz) | FFT size (>48 kHz) | Latency |
 |---|---|---|---|
-| Precision | 2048 | 4096 | 1024 / 2048 samples (50% hop) |
-| Transient | 1024 | 2048 | 512 / 1024 samples (50% hop) |
+| Precision | 2048 | 4096 | 4096 / 8192 samples (2 × FFT size) |
+| Transient | 1024 | 2048 | 2048 / 4096 samples (2 × FFT size) |
 
-Reported latency (`getTailLengthSeconds`) is half the FFT size — the overlap-add hop.
+Reported host latency is `2 × FFT size` — one full ring buffer cycle. Overlap mode controls FFT frame rate only; it does not change the output delay.
 
 ---
 
