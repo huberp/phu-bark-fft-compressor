@@ -35,11 +35,14 @@ on:
         default: ''
     outputs:
       validation-status:
-        description: 'pluginval result: passed | failed | no_plugin | no_pluginval | skipped'
+        description: 'pluginval result: passed | failed | no_plugin | no_pluginval | skipped (empty when validation is not run)'
         value: ${{ jobs.build.outputs.validation-status }}
 
 jobs:
   build:
+    # macos-latest resolves to the newest available macOS runner (Apple Silicon / arm64).
+    # macos-13 is the last Intel (x86_64) image offered by GitHub Actions; update this
+    # label when GitHub deprecates macos-13 in favour of a newer Intel image.
     runs-on: ${{ inputs.arch == 'arm64' && 'macos-latest' || 'macos-13' }}
 
     outputs:
