@@ -406,7 +406,7 @@ PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioP
     sections_ = {
         { &spectrumDisplay,      LayoutMetrics::spectrumHeight },
         { &gainReductionPanel,   LayoutMetrics::gainReductionHeight },
-        { &compressorGroup,      LayoutMetrics::groupHeight(9) },
+        { &compressorGroup,      LayoutMetrics::groupHeight(8) },
         { &transientShaperGroup, LayoutMetrics::groupHeight(4) },
         { &displayGroup,         LayoutMetrics::groupHeight(3) },
     };
