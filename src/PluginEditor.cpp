@@ -14,6 +14,9 @@ struct LayoutMetrics {
     static constexpr int gainReductionHeight = 80;
     static constexpr int defaultEditorWidth  = 700;
     static constexpr int toggleColumnGap   = 10;
+    static constexpr int levelRowHeight    = 44;  // taller rows give the meter bars visual space
+    static constexpr int meterWidth        = 44;  // combined L+R bar strip width
+    static constexpr int levelGroupHeight  = 2 * groupPaddingV + 2 * levelRowHeight + rowGap;
 
     static constexpr int groupHeight(int numRows) noexcept {
         return 2 * groupPaddingV + numRows * rowHeight + (numRows - 1) * rowGap;
@@ -399,6 +402,40 @@ PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioP
     };
     addAndMakeVisible(grCurveToggle);
 
+    // ── I/O Level & Gain group ─────────────────────────────────────────────────
+
+    levelGroup.setText("I/O Level & Gain");
+    levelGroup.setTextLabelPosition(juce::Justification::centredLeft);
+    addAndMakeVisible(levelGroup);
+
+    addAndMakeVisible(inputMeter);
+
+    inputGainLabel.setText("Input Gain", juce::dontSendNotification);
+    inputGainLabel.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(inputGainLabel);
+
+    inputGainSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    inputGainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    inputGainSlider.setTextValueSuffix(" dB");
+    addAndMakeVisible(inputGainSlider);
+    inputGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_INPUT_GAIN,
+        inputGainSlider);
+
+    addAndMakeVisible(outputMeter);
+
+    outputGainLabel.setText("Output Gain", juce::dontSendNotification);
+    outputGainLabel.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(outputGainLabel);
+
+    outputGainSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    outputGainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    outputGainSlider.setTextValueSuffix(" dB");
+    addAndMakeVisible(outputGainSlider);
+    outputGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_OUTPUT_GAIN,
+        outputGainSlider);
+
     // Start UI timer at 60 Hz
     startTimerHz(60);
 
@@ -406,6 +443,7 @@ PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioP
     sections_ = {
         { &spectrumDisplay,      LayoutMetrics::spectrumHeight },
         { &gainReductionPanel,   LayoutMetrics::gainReductionHeight },
+        { &levelGroup,           LayoutMetrics::levelGroupHeight },
         { &compressorGroup,      LayoutMetrics::groupHeight(8) },
         { &transientShaperGroup, LayoutMetrics::groupHeight(4) },
         { &displayGroup,         LayoutMetrics::groupHeight(3) },
@@ -496,7 +534,29 @@ void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::resized() {
     }
 
     fb.performLayout(getLocalBounds().reduced(LayoutMetrics::outerPadding).toFloat());
+    // ── I/O Level & Gain group internals ─────────────────────────────────────────────
+    if (levelGroup.isVisible()) {
+        auto content = levelGroup.getBounds()
+                           .reduced(LayoutMetrics::groupPaddingH, LayoutMetrics::groupPaddingV);
+        const int sliderLabelWidth = LayoutMetrics::labelWidth - LayoutMetrics::meterWidth;
 
+        // Input row: [meter] [label] [slider]
+        {
+            auto row = content.removeFromTop(LayoutMetrics::levelRowHeight);
+            inputMeter.setBounds(row.removeFromLeft(LayoutMetrics::meterWidth));
+            inputGainLabel.setBounds(row.removeFromLeft(sliderLabelWidth));
+            inputGainSlider.setBounds(row);
+        }
+        content.removeFromTop(LayoutMetrics::rowGap);
+
+        // Output row: [meter] [label] [slider]
+        {
+            auto row = content.removeFromTop(LayoutMetrics::levelRowHeight);
+            outputMeter.setBounds(row.removeFromLeft(LayoutMetrics::meterWidth));
+            outputGainLabel.setBounds(row.removeFromLeft(sliderLabelWidth));
+            outputGainSlider.setBounds(row);
+        }
+    }
     // ── Compressor group internals ───────────────────────────────────────
     {
         auto content = compressorGroup.getBounds()
@@ -569,6 +629,12 @@ void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::timerCallback() {
     // Repaint spectrum and gain reduction
     spectrumDisplay.repaint();
     gainReductionPanel.repaint();
+
+    // Update level meters with current block RMS values.
+    inputMeter.setLevel(audioProcessor.getInputRmsL(), audioProcessor.getInputRmsR());
+    outputMeter.setLevel(audioProcessor.getOutputRmsL(), audioProcessor.getOutputRmsR());
+    inputMeter.repaint();
+    outputMeter.repaint();
 }
 
 template class PhuBarkFFTCompressorAudioProcessorEditor<float>;

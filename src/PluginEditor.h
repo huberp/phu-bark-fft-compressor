@@ -1,6 +1,7 @@
 #pragma once
 
 #include "audio/FFTProcessor.h"
+#include "LevelMeterComponent.h"
 #include "SpectrumDisplay.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -46,7 +47,18 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
         bool showGRCurve = false;
     };
     GainReductionPanel gainReductionPanel;
+    // ── I/O Level & Gain group ───────────────────────────────────────────────
+    juce::GroupComponent levelGroup;
 
+    LevelMeterComponent inputMeter;
+    juce::Label         inputGainLabel;
+    juce::Slider        inputGainSlider;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> inputGainAttachment;
+
+    LevelMeterComponent outputMeter;
+    juce::Label         outputGainLabel;
+    juce::Slider        outputGainSlider;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> outputGainAttachment;
     // ── Compressor controls ──────────────────────────────────────────────
     juce::GroupComponent compressorGroup;
 
