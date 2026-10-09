@@ -27,3 +27,31 @@ jobs:
       run: cmake --preset linux-x64-vst3-release
     - name: Build
       run: cmake --build --preset linux-x64-vst3-release-build
+
+  build-macos-arm64-vst3:
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      arch: arm64
+      format: VST3
+      run-pluginval: true
+
+  build-macos-arm64-au:
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      arch: arm64
+      format: AU
+      run-pluginval: false
+
+  build-macos-x64-vst3:
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      arch: x64
+      format: VST3
+      run-pluginval: true
+
+  build-macos-x64-au:
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      arch: x64
+      format: AU
+      run-pluginval: false
