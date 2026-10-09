@@ -1,6 +1,26 @@
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 
+namespace {
+struct LayoutMetrics {
+    static constexpr int outerPadding      = 10;
+    static constexpr int rowHeight         = 24;
+    static constexpr int rowGap            = 4;
+    static constexpr int labelWidth        = 110;
+    static constexpr int groupPaddingV     = 18;
+    static constexpr int groupPaddingH     = 10;
+    static constexpr int groupGap          = 6;
+    static constexpr int spectrumHeight    = 220;
+    static constexpr int gainReductionHeight = 80;
+    static constexpr int defaultEditorWidth  = 700;
+    static constexpr int toggleColumnGap   = 10;
+
+    static constexpr int groupHeight(int numRows) noexcept {
+        return 2 * groupPaddingV + numRows * rowHeight + (numRows - 1) * rowGap;
+    }
+};
+} // namespace
+
 // ============================================================================
 // GainReductionPanel
 // ============================================================================
@@ -382,8 +402,16 @@ PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioP
     // Start UI timer at 60 Hz
     startTimerHz(60);
 
-    // Set editor size
-    setSize(700, 896);
+    // Section registry — remove or reorder entries to change the editor layout.
+    sections_ = {
+        { &spectrumDisplay,      LayoutMetrics::spectrumHeight },
+        { &gainReductionPanel,   LayoutMetrics::gainReductionHeight },
+        { &compressorGroup,      LayoutMetrics::groupHeight(9) },
+        { &transientShaperGroup, LayoutMetrics::groupHeight(4) },
+        { &displayGroup,         LayoutMetrics::groupHeight(3) },
+    };
+
+    setSize(LayoutMetrics::defaultEditorWidth, computePreferredEditorHeight());
 }
 
 template <typename SampleType>
@@ -401,147 +429,124 @@ void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::paint(juce::Graphics&
 }
 
 // ============================================================================
+// Layout helpers
+// ============================================================================
+
+template <typename SampleType>
+int PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::computePreferredEditorHeight() const {
+    int visibleCount = 0;
+    int total = 2 * LayoutMetrics::outerPadding;
+    for (const auto& s : sections_) {
+        if (!s.visible) continue;
+        total += s.preferredHeight;
+        ++visibleCount;
+    }
+    if (visibleCount > 1)
+        total += (visibleCount - 1) * LayoutMetrics::groupGap;
+    return total;
+}
+
+// ── Internal group layout helpers ───────────────────────────────────────────
+
+namespace {
+// Lays out a label+control row and advances the content rect.
+void layoutLabelRow(juce::Rectangle<int>& content, juce::Label& label,
+                    juce::Component& control) {
+    auto row = content.removeFromTop(LayoutMetrics::rowHeight);
+    label.setBounds(row.removeFromLeft(LayoutMetrics::labelWidth));
+    control.setBounds(row);
+    content.removeFromTop(LayoutMetrics::rowGap);
+}
+} // namespace
+
+// ============================================================================
 // Layout
 // ============================================================================
 
 template <typename SampleType>
 void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::resized() {
-    auto area = getLocalBounds().reduced(10);
+    // ── Outer FlexBox stack (only visible sections) ──────────────────────
+    juce::FlexBox fb;
+    fb.flexDirection = juce::FlexBox::Direction::column;
+    fb.flexWrap      = juce::FlexBox::Wrap::noWrap;
 
-    // Spectrum display (top section)
-    spectrumDisplay.setBounds(area.removeFromTop(220));
-    area.removeFromTop(6);
+    const int lastVisible = [&]() {
+        int idx = -1;
+        for (int i = 0; i < static_cast<int>(sections_.size()); ++i)
+            if (sections_[i].visible) idx = i;
+        return idx;
+    }();
 
-    // Gain reduction meters
-    gainReductionPanel.setBounds(area.removeFromTop(80));
-    area.removeFromTop(8);
+    for (int i = 0; i < static_cast<int>(sections_.size()); ++i) {
+        const auto& s = sections_[i];
+        if (!s.visible) {
+            s.component->setVisible(false);
+            continue;
+        }
+        s.component->setVisible(true);
+        juce::FlexItem item(*s.component);
+        item.height = static_cast<float>(s.preferredHeight);
+        item.width  = static_cast<float>(getWidth() - 2 * LayoutMetrics::outerPadding);
+        // gap below every section except the last
+        item.margin = juce::FlexItem::Margin(
+            0.0f, 0.0f,
+            i != lastVisible ? static_cast<float>(LayoutMetrics::groupGap) : 0.0f,
+            0.0f);
+        fb.items.add(item);
+    }
 
-    // ── Layout constants ────────────────────────────────────────────────
-    constexpr int kRowHeight = 24;
-    constexpr int kRowGap = 4;
-    constexpr int kGroupPaddingV = 18;
-    constexpr int kGroupPaddingH = 10;
-    constexpr int kGroupSpacing = 8;
-    constexpr int kLabelWidth = 110;
+    fb.performLayout(getLocalBounds().reduced(LayoutMetrics::outerPadding).toFloat());
 
-    // Helper lambda: group height for N rows
-    auto groupHeight = [&](int numRows) {
-        return 2 * kGroupPaddingV + numRows * kRowHeight + (numRows - 1) * kRowGap;
-    };
+    // ── Compressor group internals ───────────────────────────────────────
+    {
+        auto content = compressorGroup.getBounds()
+                           .reduced(LayoutMetrics::groupPaddingH, LayoutMetrics::groupPaddingV);
+        layoutLabelRow(content, thresholdLabel,   thresholdSlider);
+        layoutLabelRow(content, ratioLabel,        ratioSlider);
+        layoutLabelRow(content, attackLabel,       attackSlider);
+        layoutLabelRow(content, releaseLabel,      releaseSlider);
+        layoutLabelRow(content, contourLabel,      contourCombo);
+        layoutLabelRow(content, fftModeLabel,      fftModeCombo);
+        layoutLabelRow(content, overlapLabel,      overlapCombo);
+        // last row — no gap after it
+        auto row = content.removeFromTop(LayoutMetrics::rowHeight);
+        smoothingLabel.setBounds(row.removeFromLeft(LayoutMetrics::labelWidth));
+        smoothingSlider.setBounds(row);
+    }
 
-    // ── Compressor controls group (9 rows) ─────────────────────────────────
+    // ── Transient Shaper group internals ────────────────────────────────
+    if (transientShaperGroup.isVisible()) {
+        auto content = transientShaperGroup.getBounds()
+                           .reduced(LayoutMetrics::groupPaddingH, LayoutMetrics::groupPaddingV);
+        layoutLabelRow(content, tsAttackLabel,     tsAttackSlider);
+        layoutLabelRow(content, tsSustainLabel,    tsSustainSlider);
+        layoutLabelRow(content, tsSensitivityLabel, tsSensitivitySlider);
+        auto row = content.removeFromTop(LayoutMetrics::rowHeight);
+        tsBypassToggle.setBounds(row);
+    }
 
-    auto compGroupArea = area.removeFromTop(groupHeight(9));
-    compressorGroup.setBounds(compGroupArea);
-    auto compContent = compGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
+    // ── Display toggles group internals ─────────────────────────────────
+    if (displayGroup.isVisible()) {
+        auto content = displayGroup.getBounds()
+                           .reduced(LayoutMetrics::groupPaddingH, LayoutMetrics::groupPaddingV);
+        const int toggleWidth =
+            (content.getWidth() - LayoutMetrics::toggleColumnGap) / 2;
 
-    // Threshold row
-    auto row = compContent.removeFromTop(kRowHeight);
-    thresholdLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    thresholdSlider.setBounds(row);
-    compContent.removeFromTop(kRowGap);
+        auto toggleRow = content.removeFromTop(LayoutMetrics::rowHeight);
+        inputFFTToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+        toggleRow.removeFromLeft(LayoutMetrics::toggleColumnGap);
+        outputFFTToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+        content.removeFromTop(LayoutMetrics::rowGap);
 
-    // Ratio row
-    row = compContent.removeFromTop(kRowHeight);
-    ratioLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    ratioSlider.setBounds(row);
-    compContent.removeFromTop(kRowGap);
+        toggleRow = content.removeFromTop(LayoutMetrics::rowHeight);
+        contourToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+        toggleRow.removeFromLeft(LayoutMetrics::toggleColumnGap);
+        barkEnergyToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+        content.removeFromTop(LayoutMetrics::rowGap);
 
-    // Attack row
-    row = compContent.removeFromTop(kRowHeight);
-    attackLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    attackSlider.setBounds(row);
-    compContent.removeFromTop(kRowGap);
-
-    // Release row
-    row = compContent.removeFromTop(kRowHeight);
-    releaseLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    releaseSlider.setBounds(row);
-    compContent.removeFromTop(kRowGap);
-
-    // Contour row
-    row = compContent.removeFromTop(kRowHeight);
-    contourLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    contourCombo.setBounds(row);
-    compContent.removeFromTop(kRowGap);
-
-    // FFT Mode row
-    row = compContent.removeFromTop(kRowHeight);
-    fftModeLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    fftModeCombo.setBounds(row);
-
-    compContent.removeFromTop(kRowGap);
-
-    // Overlap Mode row
-    row = compContent.removeFromTop(kRowHeight);
-    overlapLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    overlapCombo.setBounds(row);
-
-    compContent.removeFromTop(kRowGap);
-
-    // Smoothing Taps row
-    row = compContent.removeFromTop(kRowHeight);
-    smoothingLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    smoothingSlider.setBounds(row);
-
-    area.removeFromTop(kGroupSpacing);
-
-    // ── Transient Shaper group (4 rows) ─────────────────────────────────
-
-    auto tsGroupArea = area.removeFromTop(groupHeight(4));
-    transientShaperGroup.setBounds(tsGroupArea);
-    auto tsContent = tsGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
-
-    // TS Attack row
-    row = tsContent.removeFromTop(kRowHeight);
-    tsAttackLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    tsAttackSlider.setBounds(row);
-    tsContent.removeFromTop(kRowGap);
-
-    // TS Sustain row
-    row = tsContent.removeFromTop(kRowHeight);
-    tsSustainLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    tsSustainSlider.setBounds(row);
-    tsContent.removeFromTop(kRowGap);
-
-    // TS Sensitivity row
-    row = tsContent.removeFromTop(kRowHeight);
-    tsSensitivityLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    tsSensitivitySlider.setBounds(row);
-    tsContent.removeFromTop(kRowGap);
-
-    // TS Bypass row
-    row = tsContent.removeFromTop(kRowHeight);
-    tsBypassToggle.setBounds(row);
-
-    area.removeFromTop(kGroupSpacing);
-
-    // ── Display toggles group (3 rows) ──────────────────────────────
-
-    auto displayGroupArea = area.removeFromTop(groupHeight(3));
-    displayGroup.setBounds(displayGroupArea);
-    auto displayContent = displayGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
-
-    // Compute toggle width once so all three rows are identical
-    const int toggleWidth = (displayContent.getWidth() - 10) / 2;
-
-    // Row 1: Input FFT | Output FFT
-    auto toggleRow = displayContent.removeFromTop(kRowHeight);
-    inputFFTToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
-    toggleRow.removeFromLeft(10);
-    outputFFTToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
-    displayContent.removeFromTop(kRowGap);
-
-    // Row 2: Contour | Bark Energy
-    toggleRow = displayContent.removeFromTop(kRowHeight);
-    contourToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
-    toggleRow.removeFromLeft(10);
-    barkEnergyToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
-    displayContent.removeFromTop(kRowGap);
-
-    // Row 3: GR Curve
-    toggleRow = displayContent.removeFromTop(kRowHeight);
-    grCurveToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+        toggleRow = content.removeFromTop(LayoutMetrics::rowHeight);
+        grCurveToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+    }
 }
 
 // ============================================================================
