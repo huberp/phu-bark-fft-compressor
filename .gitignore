@@ -3,6 +3,9 @@ build/
 out/
 cmake-build-*/
 
+#Fetched by CMAKE
+JUCE/
+
 # IDE files
 .vs/
 .vscode/

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.31.6)
-project(phu-bark-fft-compressor VERSION 0.1.0 LANGUAGES C CXX)
+project(phu-bark-fft-compressor VERSION 0.8.0 LANGUAGES C CXX)
 
 # =============================================================================
 # Top-Level Guard
@@ -7,6 +7,22 @@ project(phu-bark-fft-compressor VERSION 0.1.0 LANGUAGES C CXX)
 if(NOT PROJECT_IS_TOP_LEVEL)
     return()
 endif()
+
+# =============================================================================
+# Fetch JUCE Framework
+# =============================================================================
+# Enable FetchContent module
+include(FetchContent)
+
+# Fetch JUCE from its official repository
+FetchContent_Declare(
+  JUCE
+  GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
+  GIT_TAG        8.0.15  # Replace with the latest stable version
+  SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/JUCE
+)
+# Load JUCE
+FetchContent_MakeAvailable(JUCE)
 
 # =============================================================================
 # Global Settings
@@ -62,7 +78,7 @@ endforeach()
 # JUCE & Dependencies
 # =============================================================================
 include(cmake/juce_config.cmake)
-add_subdirectory(JUCE)
+#add_subdirectory(JUCE)
 add_subdirectory(phu-audio-lib EXCLUDE_FROM_ALL)
 
 add_subdirectory(lib)
