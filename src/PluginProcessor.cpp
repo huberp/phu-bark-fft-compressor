@@ -16,6 +16,9 @@ BarkFFTCompressor::OverlapMode overlapModeFromIndex(int index) {
 int clampedOverlapModeIndex(int index) {
     return juce::jlimit(0, 2, index);
 }
+
+// Single definition point for the RMS integration window used by all four meters.
+static constexpr float kRmsWindowMs = 30.0f;
 } // namespace
 
 PhuBarkFFTCompressorAudioProcessor::PhuBarkFFTCompressorAudioProcessor()
@@ -36,6 +39,8 @@ PhuBarkFFTCompressorAudioProcessor::PhuBarkFFTCompressorAudioProcessor()
     tsSensitivityParam = apvts.getRawParameterValue(PARAM_TS_SENSITIVITY);
     tsBypassParam      = apvts.getRawParameterValue(PARAM_TS_BYPASS);
     smoothingParam     = apvts.getRawParameterValue(PARAM_SMOOTHING);
+    inputGainParam     = apvts.getRawParameterValue(PARAM_INPUT_GAIN);
+    outputGainParam    = apvts.getRawParameterValue(PARAM_OUTPUT_GAIN);
 }
 
 PhuBarkFFTCompressorAudioProcessor::~PhuBarkFFTCompressorAudioProcessor() = default;
@@ -137,10 +142,25 @@ PhuBarkFFTCompressorAudioProcessor::createParameterLayout() {
         0.3f,
         juce::AudioParameterFloatAttributes().withLabel("")));
 
+    // ── Input / Output Gain ───────────────────────────────────────────────
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{PARAM_INPUT_GAIN, 1},
+        "Input Gain",
+        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f),
+        0.0f,
+        juce::AudioParameterFloatAttributes().withLabel("dB")));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{PARAM_OUTPUT_GAIN, 1},
+        "Output Gain",
+        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f),
+        0.0f,
+        juce::AudioParameterFloatAttributes().withLabel("dB")));
+
     return {params.begin(), params.end()};
 }
 
-void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int /*samplesPerBlock*/) {
+void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
     // Apply FFT mode before prepare so buffers are sized correctly
     const int fftModeIndex = static_cast<int>(fftModeParam->load());
     lastFFTModeIndex = fftModeIndex;
@@ -176,6 +196,28 @@ void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int /*
 
     m_inputFifo.reset();
     m_outputFifo.reset();
+
+    // Prepare gain stages; 10 ms ramp avoids clicks on parameter changes.
+    const juce::dsp::ProcessSpec spec{
+        sampleRate,
+        static_cast<juce::uint32>(samplesPerBlock),
+        static_cast<juce::uint32>(getTotalNumOutputChannels())
+    };
+    m_inputGain.prepare(spec);
+    m_outputGain.prepare(spec);
+    m_inputGain.setRampDurationSeconds(0.01);
+    m_outputGain.setRampDurationSeconds(0.01);
+    m_inputGain.setGainDecibels(inputGainParam->load());
+    m_outputGain.setGainDecibels(outputGainParam->load());
+
+    m_inputRmsL.store(0.0f, std::memory_order_relaxed);
+    m_inputRmsR.store(0.0f, std::memory_order_relaxed);
+    m_outputRmsL.store(0.0f, std::memory_order_relaxed);
+    m_outputRmsR.store(0.0f, std::memory_order_relaxed);
+    m_inputRmsWindowL.prepare(sampleRate, kRmsWindowMs);
+    m_inputRmsWindowR.prepare(sampleRate, kRmsWindowMs);
+    m_outputRmsWindowL.prepare(sampleRate, kRmsWindowMs);
+    m_outputRmsWindowR.prepare(sampleRate, kRmsWindowMs);
 }
 
 void PhuBarkFFTCompressorAudioProcessor::releaseResources() {
@@ -234,6 +276,23 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         tsSensitivityParam->load(),
         tsBypassParam->load() >= 0.5f);
 
+    // Update gain targets once per block; juce::dsp::Gain smooths the transition internally.
+    m_inputGain.setGainDecibels(inputGainParam->load());
+    m_outputGain.setGainDecibels(outputGainParam->load());
+
+    // Apply input gain (SIMD via AudioBlock).
+    {
+        juce::dsp::AudioBlock<float> block(buffer);
+        m_inputGain.process(juce::dsp::ProcessContextReplacing<float>(block));
+    }
+
+    {
+        const float* rdL = buffer.getReadPointer(0);
+        const float* rdR = buffer.getReadPointer(totalNumInputChannels > 1 ? 1 : 0);
+        m_inputRmsL.store(m_inputRmsWindowL.processSamples(rdL, numSamples), std::memory_order_relaxed);
+        m_inputRmsR.store(m_inputRmsWindowR.processSamples(rdR, numSamples), std::memory_order_relaxed);
+    }
+
     // Push input samples to FIFO for UI display
     const float* inputPtrs[2] = {buffer.getReadPointer(0),
                                   totalNumInputChannels > 1 ? buffer.getReadPointer(1)
@@ -257,6 +316,19 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         leftChannel[i] = result.left;
         if (rightChannel)
             rightChannel[i] = result.right;
+    }
+
+    // Apply output gain (SIMD via AudioBlock).
+    {
+        juce::dsp::AudioBlock<float> block(buffer);
+        m_outputGain.process(juce::dsp::ProcessContextReplacing<float>(block));
+    }
+
+    {
+        const float* rdL = buffer.getReadPointer(0);
+        const float* rdR = buffer.getReadPointer(totalNumInputChannels > 1 ? 1 : 0);
+        m_outputRmsL.store(m_outputRmsWindowL.processSamples(rdL, numSamples), std::memory_order_relaxed);
+        m_outputRmsR.store(m_outputRmsWindowR.processSamples(rdR, numSamples), std::memory_order_relaxed);
     }
 
     // Push output samples to FIFO for UI display

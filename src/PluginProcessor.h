@@ -3,12 +3,14 @@
 #include "audio/AudioSampleFifo.h"
 #include "audio/BarkFFTCompressor.h"
 #include "audio/TransientShaper.h"
+#include "audio/WindowedRMS.h"
 #include <atomic>
 #include <juce_audio_processors/juce_audio_processors.h>
 
 using phu::audio::AudioSampleFifo;
 using phu::audio::BarkFFTCompressor;
 using phu::audio::TransientShaper;
+using phu::audio::WindowedRMS;
 
 class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
   public:
@@ -49,6 +51,12 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     // Access the compressor for UI visualization
     const BarkFFTCompressor& getCompressor() const { return m_compressor; }
 
+    // Linear RMS values written by the audio thread, read by the UI timer.
+    float getInputRmsL()  const noexcept { return m_inputRmsL.load(std::memory_order_relaxed); }
+    float getInputRmsR()  const noexcept { return m_inputRmsR.load(std::memory_order_relaxed); }
+    float getOutputRmsL() const noexcept { return m_outputRmsL.load(std::memory_order_relaxed); }
+    float getOutputRmsR() const noexcept { return m_outputRmsR.load(std::memory_order_relaxed); }
+
     // Parameter IDs
     static constexpr const char* PARAM_THRESHOLD   = "threshold";
     static constexpr const char* PARAM_RATIO        = "ratio";
@@ -62,6 +70,8 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     static constexpr const char* PARAM_TS_SENSITIVITY = "ts_sensitivity";
     static constexpr const char* PARAM_TS_BYPASS    = "ts_bypass";
     static constexpr const char* PARAM_SMOOTHING    = "smoothing";
+    static constexpr const char* PARAM_INPUT_GAIN   = "input_gain";
+    static constexpr const char* PARAM_OUTPUT_GAIN  = "output_gain";
 
   private:
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
@@ -86,6 +96,8 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     std::atomic<float>* tsSensitivityParam = nullptr;
     std::atomic<float>* tsBypassParam     = nullptr;
     std::atomic<float>* smoothingParam    = nullptr;
+    std::atomic<float>* inputGainParam    = nullptr;
+    std::atomic<float>* outputGainParam   = nullptr;
 
     // Tracks the last applied FFT mode to detect changes in processBlock
     int lastFFTModeIndex = 0;
@@ -94,12 +106,26 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     int lastOverlapModeIndex = 0;
 
     // Core DSP
-    BarkFFTCompressor m_compressor;
-    TransientShaper   m_transientShaper;
+    BarkFFTCompressor      m_compressor;
+    TransientShaper        m_transientShaper;
+    juce::dsp::Gain<float> m_inputGain;
+    juce::dsp::Gain<float> m_outputGain;
 
     // Lock-free FIFOs for UI display
     AudioSampleFifo<2> m_inputFifo;
     AudioSampleFifo<2> m_outputFifo;
+
+    // Windowed RMS meters (audio thread only; no cross-thread access).
+    WindowedRMS m_inputRmsWindowL;
+    WindowedRMS m_inputRmsWindowR;
+    WindowedRMS m_outputRmsWindowL;
+    WindowedRMS m_outputRmsWindowR;
+
+    // Atomics carry the latest RMS snapshot to the UI thread.
+    std::atomic<float> m_inputRmsL  { 0.0f };
+    std::atomic<float> m_inputRmsR  { 0.0f };
+    std::atomic<float> m_outputRmsL { 0.0f };
+    std::atomic<float> m_outputRmsR { 0.0f };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PhuBarkFFTCompressorAudioProcessor)
 };

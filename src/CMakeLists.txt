@@ -10,6 +10,7 @@ juce_add_plugin(phu-bark-fft-compressor
 )
 
 target_sources(phu-bark-fft-compressor PRIVATE
+    LevelMeterComponent.h
     PluginProcessor.cpp
     PluginProcessor.h
     PluginEditor.cpp

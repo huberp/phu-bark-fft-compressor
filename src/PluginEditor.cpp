@@ -1,6 +1,30 @@
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 
+namespace {
+struct LayoutMetrics {
+    static constexpr int outerPadding      = 10;
+    static constexpr int rowHeight         = 24;
+    static constexpr int rowGap            = 4;
+    static constexpr int labelWidth        = 110;
+    static constexpr int groupPaddingV     = 18;
+    static constexpr int groupPaddingH     = 10;
+    static constexpr int groupGap          = 6;
+    static constexpr int spectrumHeight    = 220;
+    static constexpr int gainReductionHeight = 80;
+    static constexpr int defaultEditorWidth  = 700;
+    static constexpr int toggleColumnGap   = 10;
+    static constexpr int levelRowHeight    = 44;  // taller rows give the meter bars visual space
+    static constexpr int meterWidth        = 44;  // combined L+R bar strip width
+    static constexpr int levelLabelHeight  = 14;  // "IN: -xx.x" text row below meters
+    static constexpr int levelGroupHeight  = 2 * groupPaddingV + 2 * levelRowHeight + 2 * rowGap + levelLabelHeight;
+
+    static constexpr int groupHeight(int numRows) noexcept {
+        return 2 * groupPaddingV + numRows * rowHeight + (numRows - 1) * rowGap;
+    }
+};
+} // namespace
+
 // ============================================================================
 // GainReductionPanel
 // ============================================================================
@@ -379,11 +403,66 @@ PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioP
     };
     addAndMakeVisible(grCurveToggle);
 
+    // ── I/O Level & Gain group ─────────────────────────────────────────────────
+
+    levelGroup.setText("I/O Level & Gain");
+    levelGroup.setTextLabelPosition(juce::Justification::centredLeft);
+    addAndMakeVisible(levelGroup);
+
+    addAndMakeVisible(inputMeter);
+
+    inputGainLabel.setText("Input Gain", juce::dontSendNotification);
+    inputGainLabel.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(inputGainLabel);
+
+    inputGainSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    inputGainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    inputGainSlider.setTextValueSuffix(" dB");
+    addAndMakeVisible(inputGainSlider);
+    inputGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_INPUT_GAIN,
+        inputGainSlider);
+
+    addAndMakeVisible(outputMeter);
+
+    inputLevelLabel.setText("IN: -inf", juce::dontSendNotification);
+    inputLevelLabel.setFont(juce::Font(juce::FontOptions(8.5f)));
+    inputLevelLabel.setBorderSize(juce::BorderSize<int>(0));
+    inputLevelLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.75f));
+    addAndMakeVisible(inputLevelLabel);
+
+    outputLevelLabel.setText("OUT: -inf", juce::dontSendNotification);
+    outputLevelLabel.setFont(juce::Font(juce::FontOptions(8.5f)));
+    outputLevelLabel.setBorderSize(juce::BorderSize<int>(0));
+    outputLevelLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.75f));
+    addAndMakeVisible(outputLevelLabel);
+
+    outputGainLabel.setText("Output Gain", juce::dontSendNotification);
+    outputGainLabel.setJustificationType(juce::Justification::centredLeft);
+    addAndMakeVisible(outputGainLabel);
+
+    outputGainSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    outputGainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
+    outputGainSlider.setTextValueSuffix(" dB");
+    addAndMakeVisible(outputGainSlider);
+    outputGainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
+        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_OUTPUT_GAIN,
+        outputGainSlider);
+
     // Start UI timer at 60 Hz
     startTimerHz(60);
 
-    // Set editor size
-    setSize(700, 896);
+    // Section registry — remove or reorder entries to change the editor layout.
+    sections_ = {
+        { &spectrumDisplay,      LayoutMetrics::spectrumHeight },
+        { &gainReductionPanel,   LayoutMetrics::gainReductionHeight },
+        { &levelGroup,           LayoutMetrics::levelGroupHeight },
+        { &compressorGroup,      LayoutMetrics::groupHeight(8) },
+        { &transientShaperGroup, LayoutMetrics::groupHeight(4) },
+        { &displayGroup,         LayoutMetrics::groupHeight(3) },
+    };
+
+    setSize(LayoutMetrics::defaultEditorWidth, computePreferredEditorHeight());
 }
 
 template <typename SampleType>
@@ -401,147 +480,160 @@ void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::paint(juce::Graphics&
 }
 
 // ============================================================================
+// Layout helpers
+// ============================================================================
+
+template <typename SampleType>
+int PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::computePreferredEditorHeight() const {
+    int visibleCount = 0;
+    int total = 2 * LayoutMetrics::outerPadding;
+    for (const auto& s : sections_) {
+        if (!s.visible) continue;
+        total += s.preferredHeight;
+        ++visibleCount;
+    }
+    if (visibleCount > 1)
+        total += (visibleCount - 1) * LayoutMetrics::groupGap;
+    return total;
+}
+
+// ── Internal group layout helpers ───────────────────────────────────────────
+
+namespace {
+// Lays out a label+control row and advances the content rect.
+void layoutLabelRow(juce::Rectangle<int>& content, juce::Label& label,
+                    juce::Component& control) {
+    auto row = content.removeFromTop(LayoutMetrics::rowHeight);
+    label.setBounds(row.removeFromLeft(LayoutMetrics::labelWidth));
+    control.setBounds(row);
+    content.removeFromTop(LayoutMetrics::rowGap);
+}
+} // namespace
+
+// ============================================================================
 // Layout
 // ============================================================================
 
 template <typename SampleType>
 void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::resized() {
-    auto area = getLocalBounds().reduced(10);
+    // ── Outer FlexBox stack (only visible sections) ──────────────────────
+    juce::FlexBox fb;
+    fb.flexDirection = juce::FlexBox::Direction::column;
+    fb.flexWrap      = juce::FlexBox::Wrap::noWrap;
 
-    // Spectrum display (top section)
-    spectrumDisplay.setBounds(area.removeFromTop(220));
-    area.removeFromTop(6);
+    const int lastVisible = [&]() {
+        int idx = -1;
+        for (int i = 0; i < static_cast<int>(sections_.size()); ++i)
+            if (sections_[i].visible) idx = i;
+        return idx;
+    }();
 
-    // Gain reduction meters
-    gainReductionPanel.setBounds(area.removeFromTop(80));
-    area.removeFromTop(8);
+    for (int i = 0; i < static_cast<int>(sections_.size()); ++i) {
+        const auto& s = sections_[i];
+        if (!s.visible) {
+            s.component->setVisible(false);
+            continue;
+        }
+        s.component->setVisible(true);
+        juce::FlexItem item(*s.component);
+        item.height = static_cast<float>(s.preferredHeight);
+        item.width  = static_cast<float>(getWidth() - 2 * LayoutMetrics::outerPadding);
+        // gap below every section except the last
+        item.margin = juce::FlexItem::Margin(
+            0.0f, 0.0f,
+            i != lastVisible ? static_cast<float>(LayoutMetrics::groupGap) : 0.0f,
+            0.0f);
+        fb.items.add(item);
+    }
 
-    // ── Layout constants ────────────────────────────────────────────────
-    constexpr int kRowHeight = 24;
-    constexpr int kRowGap = 4;
-    constexpr int kGroupPaddingV = 18;
-    constexpr int kGroupPaddingH = 10;
-    constexpr int kGroupSpacing = 8;
-    constexpr int kLabelWidth = 110;
+    fb.performLayout(getLocalBounds().reduced(LayoutMetrics::outerPadding).toFloat());
+    // ── I/O Level & Gain group internals ─────────────────────────────────────────────
+    if (levelGroup.isVisible()) {
+        auto content = levelGroup.getBounds()
+                           .reduced(LayoutMetrics::groupPaddingH, LayoutMetrics::groupPaddingV);
 
-    // Helper lambda: group height for N rows
-    auto groupHeight = [&](int numRows) {
-        return 2 * kGroupPaddingV + numRows * kRowHeight + (numRows - 1) * kRowGap;
-    };
+        const int meterGap      = 4;
+        const int meterPairW    = 2 * LayoutMetrics::meterWidth + meterGap;
+        const int meterContentH = 2 * LayoutMetrics::levelRowHeight + LayoutMetrics::rowGap;
 
-    // ── Compressor controls group (9 rows) ─────────────────────────────────
+        // ── Left: meters side-by-side, then level text labels below ──────────
+        auto left = content.removeFromLeft(meterPairW);
+        content.removeFromLeft(LayoutMetrics::groupPaddingH);  // breathing room before sliders
 
-    auto compGroupArea = area.removeFromTop(groupHeight(9));
-    compressorGroup.setBounds(compGroupArea);
-    auto compContent = compGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
+        auto meterArea = left.removeFromTop(meterContentH);
+        inputMeter.setBounds(meterArea.removeFromLeft(LayoutMetrics::meterWidth));
+        meterArea.removeFromLeft(meterGap);
+        outputMeter.setBounds(meterArea);
 
-    // Threshold row
-    auto row = compContent.removeFromTop(kRowHeight);
-    thresholdLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    thresholdSlider.setBounds(row);
-    compContent.removeFromTop(kRowGap);
+        left.removeFromTop(LayoutMetrics::rowGap);
+        auto labelRow = left.removeFromTop(LayoutMetrics::levelLabelHeight);
+        inputLevelLabel.setBounds(labelRow.removeFromLeft(LayoutMetrics::meterWidth));
+        labelRow.removeFromLeft(meterGap);
+        outputLevelLabel.setBounds(labelRow);
 
-    // Ratio row
-    row = compContent.removeFromTop(kRowHeight);
-    ratioLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    ratioSlider.setBounds(row);
-    compContent.removeFromTop(kRowGap);
+        // ── Right: input gain / output gain sliders stacked ──────────────────
+        {
+            auto row = content.removeFromTop(LayoutMetrics::levelRowHeight);
+            inputGainLabel.setBounds(row.removeFromLeft(LayoutMetrics::labelWidth));
+            inputGainSlider.setBounds(row);
+        }
+        content.removeFromTop(LayoutMetrics::rowGap);
+        {
+            auto row = content.removeFromTop(LayoutMetrics::levelRowHeight);
+            outputGainLabel.setBounds(row.removeFromLeft(LayoutMetrics::labelWidth));
+            outputGainSlider.setBounds(row);
+        }
+    }
+    // ── Compressor group internals ───────────────────────────────────────
+    {
+        auto content = compressorGroup.getBounds()
+                           .reduced(LayoutMetrics::groupPaddingH, LayoutMetrics::groupPaddingV);
+        layoutLabelRow(content, thresholdLabel,   thresholdSlider);
+        layoutLabelRow(content, ratioLabel,        ratioSlider);
+        layoutLabelRow(content, attackLabel,       attackSlider);
+        layoutLabelRow(content, releaseLabel,      releaseSlider);
+        layoutLabelRow(content, contourLabel,      contourCombo);
+        layoutLabelRow(content, fftModeLabel,      fftModeCombo);
+        layoutLabelRow(content, overlapLabel,      overlapCombo);
+        // last row — no gap after it
+        auto row = content.removeFromTop(LayoutMetrics::rowHeight);
+        smoothingLabel.setBounds(row.removeFromLeft(LayoutMetrics::labelWidth));
+        smoothingSlider.setBounds(row);
+    }
 
-    // Attack row
-    row = compContent.removeFromTop(kRowHeight);
-    attackLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    attackSlider.setBounds(row);
-    compContent.removeFromTop(kRowGap);
+    // ── Transient Shaper group internals ────────────────────────────────
+    if (transientShaperGroup.isVisible()) {
+        auto content = transientShaperGroup.getBounds()
+                           .reduced(LayoutMetrics::groupPaddingH, LayoutMetrics::groupPaddingV);
+        layoutLabelRow(content, tsAttackLabel,     tsAttackSlider);
+        layoutLabelRow(content, tsSustainLabel,    tsSustainSlider);
+        layoutLabelRow(content, tsSensitivityLabel, tsSensitivitySlider);
+        auto row = content.removeFromTop(LayoutMetrics::rowHeight);
+        tsBypassToggle.setBounds(row);
+    }
 
-    // Release row
-    row = compContent.removeFromTop(kRowHeight);
-    releaseLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    releaseSlider.setBounds(row);
-    compContent.removeFromTop(kRowGap);
+    // ── Display toggles group internals ─────────────────────────────────
+    if (displayGroup.isVisible()) {
+        auto content = displayGroup.getBounds()
+                           .reduced(LayoutMetrics::groupPaddingH, LayoutMetrics::groupPaddingV);
+        const int toggleWidth =
+            (content.getWidth() - LayoutMetrics::toggleColumnGap) / 2;
 
-    // Contour row
-    row = compContent.removeFromTop(kRowHeight);
-    contourLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    contourCombo.setBounds(row);
-    compContent.removeFromTop(kRowGap);
+        auto toggleRow = content.removeFromTop(LayoutMetrics::rowHeight);
+        inputFFTToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+        toggleRow.removeFromLeft(LayoutMetrics::toggleColumnGap);
+        outputFFTToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+        content.removeFromTop(LayoutMetrics::rowGap);
 
-    // FFT Mode row
-    row = compContent.removeFromTop(kRowHeight);
-    fftModeLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    fftModeCombo.setBounds(row);
+        toggleRow = content.removeFromTop(LayoutMetrics::rowHeight);
+        contourToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+        toggleRow.removeFromLeft(LayoutMetrics::toggleColumnGap);
+        barkEnergyToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+        content.removeFromTop(LayoutMetrics::rowGap);
 
-    compContent.removeFromTop(kRowGap);
-
-    // Overlap Mode row
-    row = compContent.removeFromTop(kRowHeight);
-    overlapLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    overlapCombo.setBounds(row);
-
-    compContent.removeFromTop(kRowGap);
-
-    // Smoothing Taps row
-    row = compContent.removeFromTop(kRowHeight);
-    smoothingLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    smoothingSlider.setBounds(row);
-
-    area.removeFromTop(kGroupSpacing);
-
-    // ── Transient Shaper group (4 rows) ─────────────────────────────────
-
-    auto tsGroupArea = area.removeFromTop(groupHeight(4));
-    transientShaperGroup.setBounds(tsGroupArea);
-    auto tsContent = tsGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
-
-    // TS Attack row
-    row = tsContent.removeFromTop(kRowHeight);
-    tsAttackLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    tsAttackSlider.setBounds(row);
-    tsContent.removeFromTop(kRowGap);
-
-    // TS Sustain row
-    row = tsContent.removeFromTop(kRowHeight);
-    tsSustainLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    tsSustainSlider.setBounds(row);
-    tsContent.removeFromTop(kRowGap);
-
-    // TS Sensitivity row
-    row = tsContent.removeFromTop(kRowHeight);
-    tsSensitivityLabel.setBounds(row.removeFromLeft(kLabelWidth));
-    tsSensitivitySlider.setBounds(row);
-    tsContent.removeFromTop(kRowGap);
-
-    // TS Bypass row
-    row = tsContent.removeFromTop(kRowHeight);
-    tsBypassToggle.setBounds(row);
-
-    area.removeFromTop(kGroupSpacing);
-
-    // ── Display toggles group (3 rows) ──────────────────────────────
-
-    auto displayGroupArea = area.removeFromTop(groupHeight(3));
-    displayGroup.setBounds(displayGroupArea);
-    auto displayContent = displayGroupArea.reduced(kGroupPaddingH, kGroupPaddingV);
-
-    // Compute toggle width once so all three rows are identical
-    const int toggleWidth = (displayContent.getWidth() - 10) / 2;
-
-    // Row 1: Input FFT | Output FFT
-    auto toggleRow = displayContent.removeFromTop(kRowHeight);
-    inputFFTToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
-    toggleRow.removeFromLeft(10);
-    outputFFTToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
-    displayContent.removeFromTop(kRowGap);
-
-    // Row 2: Contour | Bark Energy
-    toggleRow = displayContent.removeFromTop(kRowHeight);
-    contourToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
-    toggleRow.removeFromLeft(10);
-    barkEnergyToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
-    displayContent.removeFromTop(kRowGap);
-
-    // Row 3: GR Curve
-    toggleRow = displayContent.removeFromTop(kRowHeight);
-    grCurveToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+        toggleRow = content.removeFromTop(LayoutMetrics::rowHeight);
+        grCurveToggle.setBounds(toggleRow.removeFromLeft(toggleWidth));
+    }
 }
 
 // ============================================================================
@@ -564,6 +656,24 @@ void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::timerCallback() {
     // Repaint spectrum and gain reduction
     spectrumDisplay.repaint();
     gainReductionPanel.repaint();
+
+    // Update level meters with current block RMS values.
+    inputMeter.setLevel(audioProcessor.getInputRmsL(), audioProcessor.getInputRmsR());
+    outputMeter.setLevel(audioProcessor.getOutputRmsL(), audioProcessor.getOutputRmsR());
+    inputMeter.repaint();
+    outputMeter.repaint();
+
+    auto toDbStr = [](float rmsL, float rmsR, const char* prefix) -> juce::String {
+        const float dB = juce::Decibels::gainToDecibels(std::max(rmsL, rmsR), -99.9f);
+        const juce::String val = (dB <= -99.0f) ? "-inf" : juce::String::formatted("%+.1f", dB);
+        return juce::String(prefix) + val;
+    };
+    inputLevelLabel.setText(
+        toDbStr(audioProcessor.getInputRmsL(), audioProcessor.getInputRmsR(), "IN: "),
+        juce::dontSendNotification);
+    outputLevelLabel.setText(
+        toDbStr(audioProcessor.getOutputRmsL(), audioProcessor.getOutputRmsR(), "OUT: "),
+        juce::dontSendNotification);
 }
 
 template class PhuBarkFFTCompressorAudioProcessorEditor<float>;
