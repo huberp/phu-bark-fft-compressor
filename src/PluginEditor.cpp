@@ -16,7 +16,8 @@ struct LayoutMetrics {
     static constexpr int toggleColumnGap   = 10;
     static constexpr int levelRowHeight    = 44;  // taller rows give the meter bars visual space
     static constexpr int meterWidth        = 44;  // combined L+R bar strip width
-    static constexpr int levelGroupHeight  = 2 * groupPaddingV + 2 * levelRowHeight + rowGap;
+    static constexpr int levelLabelHeight  = 14;  // "IN: -xx.x" text row below meters
+    static constexpr int levelGroupHeight  = 2 * groupPaddingV + 2 * levelRowHeight + 2 * rowGap + levelLabelHeight;
 
     static constexpr int groupHeight(int numRows) noexcept {
         return 2 * groupPaddingV + numRows * rowHeight + (numRows - 1) * rowGap;
@@ -424,6 +425,18 @@ PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioP
 
     addAndMakeVisible(outputMeter);
 
+    inputLevelLabel.setText("IN: -inf", juce::dontSendNotification);
+    inputLevelLabel.setFont(juce::Font(juce::FontOptions(8.5f)));
+    inputLevelLabel.setBorderSize(juce::BorderSize<int>(0));
+    inputLevelLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.75f));
+    addAndMakeVisible(inputLevelLabel);
+
+    outputLevelLabel.setText("OUT: -inf", juce::dontSendNotification);
+    outputLevelLabel.setFont(juce::Font(juce::FontOptions(8.5f)));
+    outputLevelLabel.setBorderSize(juce::BorderSize<int>(0));
+    outputLevelLabel.setColour(juce::Label::textColourId, juce::Colours::white.withAlpha(0.75f));
+    addAndMakeVisible(outputLevelLabel);
+
     outputGainLabel.setText("Output Gain", juce::dontSendNotification);
     outputGainLabel.setJustificationType(juce::Justification::centredLeft);
     addAndMakeVisible(outputGainLabel);
@@ -538,22 +551,36 @@ void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::resized() {
     if (levelGroup.isVisible()) {
         auto content = levelGroup.getBounds()
                            .reduced(LayoutMetrics::groupPaddingH, LayoutMetrics::groupPaddingV);
-        const int sliderLabelWidth = LayoutMetrics::labelWidth - LayoutMetrics::meterWidth;
 
-        // Input row: [meter] [label] [slider]
+        const int meterGap      = 4;
+        const int meterPairW    = 2 * LayoutMetrics::meterWidth + meterGap;
+        const int meterContentH = 2 * LayoutMetrics::levelRowHeight + LayoutMetrics::rowGap;
+
+        // ── Left: meters side-by-side, then level text labels below ──────────
+        auto left = content.removeFromLeft(meterPairW);
+        content.removeFromLeft(LayoutMetrics::groupPaddingH);  // breathing room before sliders
+
+        auto meterArea = left.removeFromTop(meterContentH);
+        inputMeter.setBounds(meterArea.removeFromLeft(LayoutMetrics::meterWidth));
+        meterArea.removeFromLeft(meterGap);
+        outputMeter.setBounds(meterArea);
+
+        left.removeFromTop(LayoutMetrics::rowGap);
+        auto labelRow = left.removeFromTop(LayoutMetrics::levelLabelHeight);
+        inputLevelLabel.setBounds(labelRow.removeFromLeft(LayoutMetrics::meterWidth));
+        labelRow.removeFromLeft(meterGap);
+        outputLevelLabel.setBounds(labelRow);
+
+        // ── Right: input gain / output gain sliders stacked ──────────────────
         {
             auto row = content.removeFromTop(LayoutMetrics::levelRowHeight);
-            inputMeter.setBounds(row.removeFromLeft(LayoutMetrics::meterWidth));
-            inputGainLabel.setBounds(row.removeFromLeft(sliderLabelWidth));
+            inputGainLabel.setBounds(row.removeFromLeft(LayoutMetrics::labelWidth));
             inputGainSlider.setBounds(row);
         }
         content.removeFromTop(LayoutMetrics::rowGap);
-
-        // Output row: [meter] [label] [slider]
         {
             auto row = content.removeFromTop(LayoutMetrics::levelRowHeight);
-            outputMeter.setBounds(row.removeFromLeft(LayoutMetrics::meterWidth));
-            outputGainLabel.setBounds(row.removeFromLeft(sliderLabelWidth));
+            outputGainLabel.setBounds(row.removeFromLeft(LayoutMetrics::labelWidth));
             outputGainSlider.setBounds(row);
         }
     }
@@ -635,6 +662,18 @@ void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::timerCallback() {
     outputMeter.setLevel(audioProcessor.getOutputRmsL(), audioProcessor.getOutputRmsR());
     inputMeter.repaint();
     outputMeter.repaint();
+
+    auto toDbStr = [](float rmsL, float rmsR, const char* prefix) -> juce::String {
+        const float dB = juce::Decibels::gainToDecibels(std::max(rmsL, rmsR), -99.9f);
+        const juce::String val = (dB <= -99.0f) ? "-inf" : juce::String::formatted("%+.1f", dB);
+        return juce::String(prefix) + val;
+    };
+    inputLevelLabel.setText(
+        toDbStr(audioProcessor.getInputRmsL(), audioProcessor.getInputRmsR(), "IN: "),
+        juce::dontSendNotification);
+    outputLevelLabel.setText(
+        toDbStr(audioProcessor.getOutputRmsL(), audioProcessor.getOutputRmsR(), "OUT: "),
+        juce::dontSendNotification);
 }
 
 template class PhuBarkFFTCompressorAudioProcessorEditor<float>;

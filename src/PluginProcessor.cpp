@@ -16,6 +16,9 @@ BarkFFTCompressor::OverlapMode overlapModeFromIndex(int index) {
 int clampedOverlapModeIndex(int index) {
     return juce::jlimit(0, 2, index);
 }
+
+// Single definition point for the RMS integration window used by all four meters.
+static constexpr float kRmsWindowMs = 30.0f;
 } // namespace
 
 PhuBarkFFTCompressorAudioProcessor::PhuBarkFFTCompressorAudioProcessor()
@@ -211,6 +214,10 @@ void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int sa
     m_inputRmsR.store(0.0f, std::memory_order_relaxed);
     m_outputRmsL.store(0.0f, std::memory_order_relaxed);
     m_outputRmsR.store(0.0f, std::memory_order_relaxed);
+    m_inputRmsWindowL.prepare(sampleRate, kRmsWindowMs);
+    m_inputRmsWindowR.prepare(sampleRate, kRmsWindowMs);
+    m_outputRmsWindowL.prepare(sampleRate, kRmsWindowMs);
+    m_outputRmsWindowR.prepare(sampleRate, kRmsWindowMs);
 }
 
 void PhuBarkFFTCompressorAudioProcessor::releaseResources() {
@@ -279,10 +286,12 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         m_inputGain.process(juce::dsp::ProcessContextReplacing<float>(block));
     }
 
-    // Measure input RMS per channel (SIMD via FloatVectorOperations).
-    m_inputRmsL.store(buffer.getRMSLevel(0, 0, numSamples), std::memory_order_relaxed);
-    m_inputRmsR.store(buffer.getRMSLevel(totalNumInputChannels > 1 ? 1 : 0, 0, numSamples),
-                      std::memory_order_relaxed);
+    {
+        const float* rdL = buffer.getReadPointer(0);
+        const float* rdR = buffer.getReadPointer(totalNumInputChannels > 1 ? 1 : 0);
+        m_inputRmsL.store(m_inputRmsWindowL.processSamples(rdL, numSamples), std::memory_order_relaxed);
+        m_inputRmsR.store(m_inputRmsWindowR.processSamples(rdR, numSamples), std::memory_order_relaxed);
+    }
 
     // Push input samples to FIFO for UI display
     const float* inputPtrs[2] = {buffer.getReadPointer(0),
@@ -315,10 +324,12 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         m_outputGain.process(juce::dsp::ProcessContextReplacing<float>(block));
     }
 
-    // Measure output RMS per channel.
-    m_outputRmsL.store(buffer.getRMSLevel(0, 0, numSamples), std::memory_order_relaxed);
-    m_outputRmsR.store(buffer.getRMSLevel(totalNumInputChannels > 1 ? 1 : 0, 0, numSamples),
-                       std::memory_order_relaxed);
+    {
+        const float* rdL = buffer.getReadPointer(0);
+        const float* rdR = buffer.getReadPointer(totalNumInputChannels > 1 ? 1 : 0);
+        m_outputRmsL.store(m_outputRmsWindowL.processSamples(rdL, numSamples), std::memory_order_relaxed);
+        m_outputRmsR.store(m_outputRmsWindowR.processSamples(rdR, numSamples), std::memory_order_relaxed);
+    }
 
     // Push output samples to FIFO for UI display
     const float* outputPtrs[2] = {buffer.getReadPointer(0),

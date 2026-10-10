@@ -59,6 +59,9 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     juce::Label         outputGainLabel;
     juce::Slider        outputGainSlider;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> outputGainAttachment;
+
+    juce::Label inputLevelLabel;   // "IN: -xx.x" — repaints only when value changes
+    juce::Label outputLevelLabel;  // "OUT: -xx.x"
     // ── Compressor controls ──────────────────────────────────────────────
     juce::GroupComponent compressorGroup;
 

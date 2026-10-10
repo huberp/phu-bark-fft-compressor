@@ -3,12 +3,14 @@
 #include "audio/AudioSampleFifo.h"
 #include "audio/BarkFFTCompressor.h"
 #include "audio/TransientShaper.h"
+#include "audio/WindowedRMS.h"
 #include <atomic>
 #include <juce_audio_processors/juce_audio_processors.h>
 
 using phu::audio::AudioSampleFifo;
 using phu::audio::BarkFFTCompressor;
 using phu::audio::TransientShaper;
+using phu::audio::WindowedRMS;
 
 class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
   public:
@@ -113,7 +115,13 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     AudioSampleFifo<2> m_inputFifo;
     AudioSampleFifo<2> m_outputFifo;
 
-    // Per-block RMS values (audio thread writes, UI timer reads; relaxed order sufficient).
+    // Windowed RMS meters (audio thread only; no cross-thread access).
+    WindowedRMS m_inputRmsWindowL;
+    WindowedRMS m_inputRmsWindowR;
+    WindowedRMS m_outputRmsWindowL;
+    WindowedRMS m_outputRmsWindowR;
+
+    // Atomics carry the latest RMS snapshot to the UI thread.
     std::atomic<float> m_inputRmsL  { 0.0f };
     std::atomic<float> m_inputRmsR  { 0.0f };
     std::atomic<float> m_outputRmsL { 0.0f };
