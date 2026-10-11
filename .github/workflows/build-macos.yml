@@ -43,7 +43,7 @@ jobs:
     # macos-latest resolves to the newest available macOS runner (Apple Silicon / arm64).
     # macos-13 is the last Intel (x86_64) image offered by GitHub Actions; update this
     # label when GitHub deprecates macos-13 in favour of a newer Intel image.
-    runs-on: ${{ inputs.arch == 'arm64' && 'macos-latest' || 'macos-13' }}
+    runs-on: ${{ inputs.arch == 'arm64' && 'macos-latest' || 'macos-15' }}
 
     outputs:
       validation-status: ${{ steps.validate.outputs.validation_status }}
