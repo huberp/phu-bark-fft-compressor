@@ -8,21 +8,40 @@ if(NOT PROJECT_IS_TOP_LEVEL)
     return()
 endif()
 
+# Enable FetchContent module
+include(FetchContent)
 # =============================================================================
 # Fetch JUCE Framework
 # =============================================================================
-# Enable FetchContent module
-include(FetchContent)
 
 # Fetch JUCE from its official repository
 FetchContent_Declare(
   JUCE
   GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
   GIT_TAG        8.0.15  # Replace with the latest stable version
+  GIT_SHALLOW    ON
   SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/JUCE
 )
 # Load JUCE
 FetchContent_MakeAvailable(JUCE)
+
+# =============================================================================
+# Fetch phu_audio_lib Framework
+# =============================================================================
+
+# Fetch phu_audio_lib from its official repository
+FetchContent_Declare(
+  phu-audio-lib
+  GIT_REPOSITORY https://github.com/huberp/phu-audio-lib.git
+  GIT_TAG        main
+  GIT_SHALLOW    ON
+  SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/phu-audio-lib
+  EXCLUDE_FROM_ALL
+)
+# Load phu_audio_lib
+FetchContent_MakeAvailable(phu-audio-lib)
+
+
 
 # =============================================================================
 # Global Settings
@@ -68,8 +87,8 @@ endif()
 foreach(SUBMODULE IN ITEMS JUCE phu-audio-lib)
     if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${SUBMODULE}/CMakeLists.txt")
         message(FATAL_ERROR
-            "${SUBMODULE} submodule not initialized. "
-            "Run: git submodule update --init --recursive"
+            "${SUBMODULE} dependency not initialized. "
+            "Make sure that dependencies JUCE and phu-audio-lib are properly cloned and initialized. "
         )
     endif()
 endforeach()
@@ -79,7 +98,7 @@ endforeach()
 # =============================================================================
 include(cmake/juce_config.cmake)
 #add_subdirectory(JUCE)
-add_subdirectory(phu-audio-lib EXCLUDE_FROM_ALL)
+#add_subdirectory(phu-audio-lib EXCLUDE_FROM_ALL)
 
 add_subdirectory(lib)
 add_subdirectory(src)
