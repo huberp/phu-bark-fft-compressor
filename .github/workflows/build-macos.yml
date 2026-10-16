@@ -43,6 +43,8 @@ jobs:
     # Keep the runner architecture aligned with the plugin target so pluginval can load it.
     # macos-latest is Apple Silicon; macos-15-intel is the Intel x86_64 runner.
     runs-on: ${{ inputs.arch == 'arm64' && 'macos-latest' || 'macos-15-intel' }}
+    permissions:
+      contents: read
 
     outputs:
       validation-status: ${{ steps.validate.outputs.validation_status }}
