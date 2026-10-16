@@ -1,10 +1,17 @@
 #pragma once
 
 #include "audio/FFTProcessor.h"
+#include "LevelMeterComponent.h"
 #include "SpectrumDisplay.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 
 class PhuBarkFFTCompressorAudioProcessor;
+
+struct LayoutSection {
+    juce::Component* component  = nullptr;
+    int              preferredHeight = 0;
+    bool             visible    = true;
+};
 
 template <typename SampleType = float>
 class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEditor,
@@ -16,6 +23,8 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     void paint(juce::Graphics&) override;
     void resized() override;
     void timerCallback() override;
+
+    int computePreferredEditorHeight() const;
 
   private:
     PhuBarkFFTCompressorAudioProcessor& audioProcessor;
@@ -38,7 +47,21 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
         bool showGRCurve = false;
     };
     GainReductionPanel gainReductionPanel;
+    // ── I/O Level & Gain group ───────────────────────────────────────────────
+    juce::GroupComponent levelGroup;
 
+    LevelMeterComponent inputMeter;
+    juce::Label         inputGainLabel;
+    juce::Slider        inputGainSlider;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> inputGainAttachment;
+
+    LevelMeterComponent outputMeter;
+    juce::Label         outputGainLabel;
+    juce::Slider        outputGainSlider;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> outputGainAttachment;
+
+    juce::Label inputLevelLabel;   // "IN: -xx.x" — repaints only when value changes
+    juce::Label outputLevelLabel;  // "OUT: -xx.x"
     // ── Compressor controls ──────────────────────────────────────────────
     juce::GroupComponent compressorGroup;
 
@@ -99,6 +122,9 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     juce::ToggleButton contourToggle;
     juce::ToggleButton barkEnergyToggle;
     juce::ToggleButton grCurveToggle;
+
+    // Ordered list of sections; remove/add entries to change editor layout.
+    std::vector<LayoutSection> sections_;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PhuBarkFFTCompressorAudioProcessorEditor)
 };
