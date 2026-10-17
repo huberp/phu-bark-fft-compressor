@@ -36,48 +36,15 @@ jobs:
   # ---------------------------------------------------------------------------
   # Build & package Linux VST3
   # ---------------------------------------------------------------------------
-  release-linux:
-    name: Linux VST3
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          submodules: recursive
-
-      - name: Install Dependencies
-        run: sudo bash scripts/install-linux-deps.sh
-
-      - name: Configure CMake
-        run: cmake --preset linux-x64-vst3-release
-
-      - name: Build
-        run: cmake --build --preset linux-x64-vst3-release-build
-
-      - name: Package VST3
-        run: |
-          VERSION="${{ github.ref_name }}"
-          VERSION="${VERSION#v}"
-          ZIP_NAME="PHU-BARK-FFT-COMPRESSOR-linux-${VERSION}.zip"
-          mkdir -p dist
-
-          VST3_PATH=$(find build/linux-x64-vst3-release/src/phu-bark-fft-compressor_artefacts/Release/VST3 \
-            -name "*.vst3" -type d | head -n 1)
-
-          if [ -z "$VST3_PATH" ]; then
-            echo "ERROR: VST3 bundle not found"
-            exit 1
-          fi
-
-          echo "Packaging: $VST3_PATH"
-          (cd "$(dirname "$VST3_PATH")" && zip -r "$GITHUB_WORKSPACE/dist/$ZIP_NAME" \
-            "$(basename "$VST3_PATH")")
-
-      - name: Upload Linux artifact
-        uses: actions/upload-artifact@v7
-        with:
-          name: linux-vst3
-          path: dist/*.zip
+  release-linux-x64:
+    name: Linux x64 VST3
+    uses: ./.github/workflows/build-linux.yml
+    with:
+      arch: x64
+      run-pluginval: true
+      upload-artifact: true
+      artifact-name: linux-x64-vst3
+      ref-name: ${{ github.ref_name }}
 
   # ---------------------------------------------------------------------------
   # Generate README.pdf
@@ -93,7 +60,7 @@ jobs:
   # ---------------------------------------------------------------------------
   publish-release:
     name: Publish GitHub Release
-    needs: [release-windows-x64, release-windows-arm64, release-linux, generate-pdf]
+    needs: [release-windows-x64, release-windows-arm64, release-linux-x64, generate-pdf]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -111,10 +78,10 @@ jobs:
           name: windows-arm64-vst3
           path: dist/
 
-      - name: Download Linux artifact
+      - name: Download Linux x64 artifact
         uses: actions/download-artifact@v8
         with:
-          name: linux-vst3
+          name: linux-x64-vst3
           path: dist/
 
       - name: Download README.pdf artifact
@@ -151,7 +118,7 @@ jobs:
             **Windows ARM64** — download `PHU-BARK-FFT-COMPRESSOR-windows-arm64-*.zip`, extract and copy
             `PHU BARK FFT COMPRESSOR.vst3` to `C:\Program Files\Common Files\VST3\`.
 
-            **Linux** — download `PHU-BARK-FFT-COMPRESSOR-linux-*.zip`, extract and copy
+            **Linux x64** — download `PHU-BARK-FFT-COMPRESSOR-linux-x64-*.zip`, extract and copy
             `PHU BARK FFT COMPRESSOR.vst3` to `~/.vst3/`.
 
             Each zip contains the `.vst3` bundle and a `README.pdf` with full documentation.
