@@ -1,7 +1,10 @@
+# Semicolon-separated JUCE formats; set by the "formats-*" presets in CMakePresets.json.
+set(PHU_PLUGIN_FORMATS "VST3" CACHE STRING "JUCE plugin formats to build (e.g. \"VST3;AU\")")
+
 juce_add_plugin(phu-bark-fft-compressor
     PLUGIN_MANUFACTURER_CODE Phub
     PLUGIN_CODE Pbfc
-    FORMATS VST3
+    FORMATS ${PHU_PLUGIN_FORMATS}
     PRODUCT_NAME "PHU BARK FFT COMPRESSOR"
     IS_SYNTH FALSE
     NEEDS_MIDI_INPUT FALSE

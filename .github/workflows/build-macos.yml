@@ -11,10 +11,6 @@ on:
         description: 'Target architecture — arm64 (Apple Silicon) or x64 (Intel)'
         type: string
         default: 'arm64'
-      format:
-        description: 'Plugin format — VST3 or AU'
-        type: string
-        default: 'VST3'
       run-pluginval:
         description: 'Run pluginval validation after build (VST3 only)'
         type: boolean
@@ -62,19 +58,19 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Configure CMake
         run: |
-          PRESET="macos-${{ inputs.arch == 'x64' && 'x64' || 'arm64' }}-${{ inputs.format == 'AU' && 'au' || 'vst3' }}-release"
+          PRESET="macos-${{ inputs.arch == 'x64' && 'x64' || 'arm64' }}-release"
           cmake --preset "$PRESET"
 
       - name: Build
         run: |
-          PRESET="macos-${{ inputs.arch == 'x64' && 'x64' || 'arm64' }}-${{ inputs.format == 'AU' && 'au' || 'vst3' }}-release-build"
+          PRESET="macos-${{ inputs.arch == 'x64' && 'x64' || 'arm64' }}-release-build"
           cmake --build --preset "$PRESET"
 
       # -----------------------------------------------------------------------
       # Validation (optional, VST3 only)
       # -----------------------------------------------------------------------
       - name: Download pluginval
-        if: ${{ inputs.run-pluginval && inputs.format == 'VST3' }}
+        if: ${{ inputs.run-pluginval }}
         run: |
           curl -fsSL \
             "https://github.com/Tracktion/pluginval/releases/latest/download/pluginval_macOS.zip" \
@@ -82,12 +78,12 @@ jobs:
           unzip -q pluginval.zip -d pluginval
 
       - name: Validate VST3 Plugin
-        if: ${{ inputs.run-pluginval && inputs.format == 'VST3' }}
+        if: ${{ inputs.run-pluginval }}
         id: validate
         run: |
           set +e
 
-          BUILD_PRESET_DIR="build/macos-${{ inputs.arch == 'x64' && 'x64' || 'arm64' }}-vst3-release"
+          BUILD_PRESET_DIR="build/macos-${{ inputs.arch == 'x64' && 'x64' || 'arm64' }}-release"
           VST3_PATH=$(find "$BUILD_PRESET_DIR" \
             -name "*.vst3" -type d | head -n 1)
 
@@ -125,19 +121,18 @@ jobs:
 
       - name: Upload Validation Results
         uses: actions/upload-artifact@v7
-        if: ${{ always() && inputs.run-pluginval && inputs.format == 'VST3' }}
+        if: ${{ always() && inputs.run-pluginval }}
         with:
-          name: validation-results-macos-${{ inputs.arch }}-${{ inputs.format }}
+          name: validation-results-macos-${{ inputs.arch }}
           path: ./validation-results/
 
       - name: Add Validation Summary
-        if: ${{ always() && inputs.run-pluginval && inputs.format == 'VST3' }}
+        if: ${{ always() && inputs.run-pluginval }}
         run: |
           STATUS="${{ steps.validate.outputs.validation_status }}"
           ARCH="${{ inputs.arch }}"
-          FORMAT="${{ inputs.format }}"
 
-          echo "## macOS Plugin Validation Results (${ARCH} / ${FORMAT})" >> "$GITHUB_STEP_SUMMARY"
+          echo "## macOS Plugin Validation Results (${ARCH})" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
           case "$STATUS" in
@@ -161,7 +156,7 @@ jobs:
           echo "📦 Full validation results available in artifacts." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fail Build on Validation Failure
-        if: ${{ always() && inputs.run-pluginval && inputs.format == 'VST3' }}
+        if: ${{ always() && inputs.run-pluginval }}
         run: |
           STATUS="${{ steps.validate.outputs.validation_status }}"
           case "$STATUS" in
@@ -181,24 +176,20 @@ jobs:
           VERSION="${{ inputs.ref-name }}"
           VERSION="${VERSION#v}"
           ARCH="${{ inputs.arch }}"
-          FORMAT="${{ inputs.format }}"
-          ZIP_NAME="PHU-BARK-FFT-COMPRESSOR-macos-${ARCH}-${FORMAT,,}-${VERSION}.zip"
+          ZIP_NAME="PHU-BARK-FFT-COMPRESSOR-macos-${ARCH}-${VERSION}.zip"
 
           mkdir -p dist staging
 
-          BUILD_PRESET_DIR="build/macos-${ARCH}-${FORMAT,,}-release"
-          if [ "$FORMAT" = "VST3" ]; then
-            PLUGIN_PATH=$(find "$BUILD_PRESET_DIR" -name "*.vst3" -type d | head -n 1)
-          else
-            PLUGIN_PATH=$(find "$BUILD_PRESET_DIR" -name "*.component" -type d | head -n 1)
-          fi
+          BUILD_PRESET_DIR="build/macos-${ARCH}-release"
+          VST3_PATH=$(find "$BUILD_PRESET_DIR" -name "*.vst3" -type d | head -n 1)
+          AU_PATH=$(find "$BUILD_PRESET_DIR" -name "*.component" -type d | head -n 1)
 
-          if [ -z "$PLUGIN_PATH" ]; then
-            echo "ERROR: Plugin bundle not found in $BUILD_PRESET_DIR"
+          if [ -z "$VST3_PATH" ] || [ -z "$AU_PATH" ]; then
+            echo "ERROR: VST3 and/or AU bundle not found in $BUILD_PRESET_DIR"
             exit 1
           fi
 
-          cp -R "$PLUGIN_PATH" staging/
+          cp -R "$VST3_PATH" "$AU_PATH" staging/
           cd staging && zip -r "../dist/$ZIP_NAME" . && cd ..
           echo "Created dist/$ZIP_NAME"
 
