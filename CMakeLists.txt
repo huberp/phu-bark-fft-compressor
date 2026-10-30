@@ -8,40 +8,13 @@ if(NOT PROJECT_IS_TOP_LEVEL)
     return()
 endif()
 
-# Enable FetchContent module
-include(FetchContent)
 # =============================================================================
-# Fetch JUCE Framework
+# Fetch Dependencies (reusable helpers in cmake/PhuDependencies.cmake)
 # =============================================================================
-
-# Fetch JUCE from its official repository
-FetchContent_Declare(
-  JUCE
-  GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
-  GIT_TAG        8.0.15  # Replace with the latest stable version
-  GIT_SHALLOW    ON
-  SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/JUCE
-)
-# Load JUCE
-FetchContent_MakeAvailable(JUCE)
-
-# =============================================================================
-# Fetch phu_audio_lib Framework
-# =============================================================================
-
-# Fetch phu_audio_lib from its official repository
-FetchContent_Declare(
-  phu-audio-lib
-  GIT_REPOSITORY https://github.com/huberp/phu-audio-lib.git
-  GIT_TAG        main
-  GIT_SHALLOW    ON
-  SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/phu-audio-lib
-  EXCLUDE_FROM_ALL
-)
-# Load phu_audio_lib
-FetchContent_MakeAvailable(phu-audio-lib)
-
-
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(PhuDependencies)
+phu_fetch_juce(TAG 8.0.15)
+phu_fetch_audio_lib(TAG main)
 
 # =============================================================================
 # Global Settings
@@ -74,7 +47,6 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(USE_INTEL_MKL "Use Intel MKL for FFT acceleration" ON)
 set(MKLROOT "" CACHE PATH "Path to MKL root (NuGet build/native or oneAPI mkl root)")
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(ConfigureIntelMKL)
 
 if(USE_INTEL_MKL)
