@@ -6,10 +6,15 @@ target_include_directories(BarkCompressorLib INTERFACE
 
 target_sources(BarkCompressorLib INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/BarkFFTCompressor.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/audio/TransientShaper.h
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/OLAWindow.h
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/EqualLoudnessContour.h
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/WindowedRMS.h
 )
+
+if(TRANSIENT_SHAPER)
+    target_sources(BarkCompressorLib INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}/audio/TransientShaper.h
+    )
+endif()
 
 target_link_libraries(BarkCompressorLib INTERFACE PhuAudioLib)

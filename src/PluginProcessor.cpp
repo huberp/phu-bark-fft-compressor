@@ -34,13 +34,11 @@ PhuBarkFFTCompressorAudioProcessor::PhuBarkFFTCompressorAudioProcessor()
     contourParam       = apvts.getRawParameterValue(PARAM_CONTOUR);
     fftModeParam       = apvts.getRawParameterValue(PARAM_FFT_MODE);
     overlapModeParam   = apvts.getRawParameterValue(PARAM_OVERLAP_MODE);
-    tsAttackParam      = apvts.getRawParameterValue(PARAM_TS_ATTACK);
-    tsSustainParam     = apvts.getRawParameterValue(PARAM_TS_SUSTAIN);
-    tsSensitivityParam = apvts.getRawParameterValue(PARAM_TS_SENSITIVITY);
-    tsBypassParam      = apvts.getRawParameterValue(PARAM_TS_BYPASS);
-    smoothingParam     = apvts.getRawParameterValue(PARAM_SMOOTHING);
+    smoothingParam      = apvts.getRawParameterValue(PARAM_SMOOTHING);
     inputGainParam     = apvts.getRawParameterValue(PARAM_INPUT_GAIN);
     outputGainParam    = apvts.getRawParameterValue(PARAM_OUTPUT_GAIN);
+    // Must run after apvts is constructed; no-op when TRANSIENT_SHAPER=OFF.
+    m_transientShaperStage.cacheParams(apvts);
 }
 
 PhuBarkFFTCompressorAudioProcessor::~PhuBarkFFTCompressorAudioProcessor() = default;
@@ -107,32 +105,8 @@ PhuBarkFFTCompressorAudioProcessor::createParameterLayout() {
         juce::StringArray{"50% (Low CPU)", "75% (High Quality)", "90% (Highest Quality)"},
         0)); // Default: 50%
 
-    // ── Transient Shaper ─────────────────────────────────────────────────
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{PARAM_TS_ATTACK, 1},
-        "Attack",
-        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f),
-        0.0f,
-        juce::AudioParameterFloatAttributes().withLabel("dB")));
-
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{PARAM_TS_SUSTAIN, 1},
-        "Sustain",
-        juce::NormalisableRange<float>(-24.0f, 24.0f, 0.1f),
-        0.0f,
-        juce::AudioParameterFloatAttributes().withLabel("dB")));
-
-    params.push_back(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{PARAM_TS_SENSITIVITY, 1},
-        "Sensitivity",
-        juce::NormalisableRange<float>(0.0f, 100.0f, 1.0f),
-        50.0f,
-        juce::AudioParameterFloatAttributes().withLabel("%")));
-
-    params.push_back(std::make_unique<juce::AudioParameterBool>(
-        juce::ParameterID{PARAM_TS_BYPASS, 1},
-        "Bypass Transient Shaper",
-        true)); // Default: bypassed
+    // ── Transient Shaper (parameters only exist when TRANSIENT_SHAPER=ON) ─
+    TransientShaperStage::addParameters(params);
 
     // ── Smoothing ─────────────────────────────────────────────────────────
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
@@ -186,13 +160,8 @@ void PhuBarkFFTCompressorAudioProcessor::prepareToPlay(double sampleRate, int sa
     // Report latency to DAW for compensation
     setLatencySamples(m_compressor.getLatencySamples());
 
-    // Prepare transient shaper
-    m_transientShaper.prepare(sampleRate);
-    m_transientShaper.setParameters(
-        tsAttackParam->load(),
-        tsSustainParam->load(),
-        tsSensitivityParam->load(),
-        tsBypassParam->load() >= 0.5f);
+    // Prepare transient shaper (envelope coefficients depend on the sample rate)
+    m_transientShaperStage.prepare(sampleRate);
 
     m_inputFifo.reset();
     m_outputFifo.reset();
@@ -270,11 +239,7 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
         smoothingAmountToAlpha(smoothingParam->load()));
 
     // Update transient shaper parameters
-    m_transientShaper.setParameters(
-        tsAttackParam->load(),
-        tsSustainParam->load(),
-        tsSensitivityParam->load(),
-        tsBypassParam->load() >= 0.5f);
+    m_transientShaperStage.updateParams();
 
     // Update gain targets once per block; juce::dsp::Gain smooths the transition internally.
     m_inputGain.setGainDecibels(inputGainParam->load());
@@ -309,9 +274,8 @@ void PhuBarkFFTCompressorAudioProcessor::processBlock(juce::AudioBuffer<float>& 
 
         auto result = m_compressor.processSample(inL, inR);
 
-        // Apply transient shaper as a post-processing stage
-        result.left  = m_transientShaper.processSample(result.left);
-        result.right = m_transientShaper.processSample(result.right);
+        // Apply transient shaper as a post-processing stage (L then R, shared envelope state)
+        m_transientShaperStage.processSample(result.left, result.right);
 
         leftChannel[i] = result.left;
         if (rightChannel)

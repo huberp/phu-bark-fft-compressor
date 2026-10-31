@@ -54,6 +54,11 @@ if(USE_INTEL_MKL)
 endif()
 
 # =============================================================================
+# Optional Features
+# =============================================================================
+option(TRANSIENT_SHAPER "Include the Transient Shaper (DSP + UI) in the plugin" OFF)
+
+# =============================================================================
 # Dependency Validation
 # =============================================================================
 foreach(SUBMODULE IN ITEMS JUCE phu-audio-lib)

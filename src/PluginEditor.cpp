@@ -1,29 +1,6 @@
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 
-namespace {
-struct LayoutMetrics {
-    static constexpr int outerPadding      = 10;
-    static constexpr int rowHeight         = 24;
-    static constexpr int rowGap            = 4;
-    static constexpr int labelWidth        = 110;
-    static constexpr int groupPaddingV     = 18;
-    static constexpr int groupPaddingH     = 10;
-    static constexpr int groupGap          = 6;
-    static constexpr int spectrumHeight    = 220;
-    static constexpr int gainReductionHeight = 80;
-    static constexpr int defaultEditorWidth  = 700;
-    static constexpr int toggleColumnGap   = 10;
-    static constexpr int levelRowHeight    = 44;  // taller rows give the meter bars visual space
-    static constexpr int meterWidth        = 44;  // combined L+R bar strip width
-    static constexpr int levelLabelHeight  = 14;  // "IN: -xx.x" text row below meters
-    static constexpr int levelGroupHeight  = 2 * groupPaddingV + 2 * levelRowHeight + 2 * rowGap + levelLabelHeight;
-
-    static constexpr int groupHeight(int numRows) noexcept {
-        return 2 * groupPaddingV + numRows * rowHeight + (numRows - 1) * rowGap;
-    }
-};
-} // namespace
 
 // ============================================================================
 // GainReductionPanel
@@ -157,7 +134,7 @@ void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::GainReductionPanel::p
 template <typename SampleType>
 PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioProcessorEditor(
     PhuBarkFFTCompressorAudioProcessor& p)
-    : AudioProcessorEditor(&p), audioProcessor(p) {
+    : AudioProcessorEditor(&p), audioProcessor(p), transientShaperUi_(p.getAPVTS()) {
     // Set up spectrum display
     spectrumDisplay.setProcessors(&inputFFT, &outputFFT, &audioProcessor.getCompressor());
     spectrumDisplay.setSampleRate(audioProcessor.getSampleRate() > 0.0
@@ -299,65 +276,6 @@ PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioP
         audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_SMOOTHING,
         smoothingSlider);
 
-    // ── Transient Shaper group ──────────────────────────────────────────
-
-    transientShaperGroup.setText("Transient Shaper");
-    transientShaperGroup.setTextLabelPosition(juce::Justification::centredLeft);
-    addAndMakeVisible(transientShaperGroup);
-
-    // TS Attack slider
-    tsAttackLabel.setText("Attack", juce::dontSendNotification);
-    tsAttackLabel.setJustificationType(juce::Justification::centredLeft);
-    tsAttackLabel.setTooltip("Boost or attenuate the attack portion of detected transients.");
-    addAndMakeVisible(tsAttackLabel);
-
-    tsAttackSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    tsAttackSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
-    tsAttackSlider.setTextValueSuffix(" dB");
-    tsAttackSlider.setTooltip("Boost or attenuate the attack portion of detected transients.");
-    addAndMakeVisible(tsAttackSlider);
-    tsAttackAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_TS_ATTACK,
-        tsAttackSlider);
-
-    // TS Sustain slider
-    tsSustainLabel.setText("Sustain", juce::dontSendNotification);
-    tsSustainLabel.setJustificationType(juce::Justification::centredLeft);
-    tsSustainLabel.setTooltip("Boost or attenuate the sustained portion of the signal.");
-    addAndMakeVisible(tsSustainLabel);
-
-    tsSustainSlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    tsSustainSlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
-    tsSustainSlider.setTextValueSuffix(" dB");
-    tsSustainSlider.setTooltip("Boost or attenuate the sustained portion of the signal.");
-    addAndMakeVisible(tsSustainSlider);
-    tsSustainAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_TS_SUSTAIN,
-        tsSustainSlider);
-
-    // TS Sensitivity slider
-    tsSensitivityLabel.setText("Sensitivity", juce::dontSendNotification);
-    tsSensitivityLabel.setJustificationType(juce::Justification::centredLeft);
-    tsSensitivityLabel.setTooltip("Threshold for detecting transients (0 = least sensitive, 100 = most sensitive).");
-    addAndMakeVisible(tsSensitivityLabel);
-
-    tsSensitivitySlider.setSliderStyle(juce::Slider::LinearHorizontal);
-    tsSensitivitySlider.setTextBoxStyle(juce::Slider::TextBoxRight, false, 60, 20);
-    tsSensitivitySlider.setTextValueSuffix(" %");
-    tsSensitivitySlider.setTooltip("Threshold for detecting transients (0 = least sensitive, 100 = most sensitive).");
-    addAndMakeVisible(tsSensitivitySlider);
-    tsSensitivityAttachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
-        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_TS_SENSITIVITY,
-        tsSensitivitySlider);
-
-    // TS Bypass toggle
-    tsBypassToggle.setButtonText("Bypass Transient Shaper");
-    tsBypassToggle.setTooltip("When enabled, bypasses the transient shaper (passes audio through unchanged).");
-    addAndMakeVisible(tsBypassToggle);
-    tsBypassAttachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment>(
-        audioProcessor.getAPVTS(), PhuBarkFFTCompressorAudioProcessor::PARAM_TS_BYPASS,
-        tsBypassToggle);
-
     // ── Display toggle group ────────────────────────────────────────────
 
     displayGroup.setText("Display");
@@ -453,14 +371,16 @@ PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::PhuBarkFFTCompressorAudioP
     startTimerHz(60);
 
     // Section registry — remove or reorder entries to change the editor layout.
+    // The Transient Shaper section is appended by transientShaperUi_ only when it is built in,
+    // so the display group moves up and the editor shrinks automatically when it is not.
     sections_ = {
         { &spectrumDisplay,      LayoutMetrics::spectrumHeight },
         { &gainReductionPanel,   LayoutMetrics::gainReductionHeight },
         { &levelGroup,           LayoutMetrics::levelGroupHeight },
         { &compressorGroup,      LayoutMetrics::groupHeight(8) },
-        { &transientShaperGroup, LayoutMetrics::groupHeight(4) },
-        { &displayGroup,         LayoutMetrics::groupHeight(3) },
     };
+    transientShaperUi_.addTo(*this, sections_);
+    sections_.push_back({ &displayGroup, LayoutMetrics::groupHeight(3) });
 
     setSize(LayoutMetrics::defaultEditorWidth, computePreferredEditorHeight());
 }
@@ -496,19 +416,6 @@ int PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::computePreferredEditor
         total += (visibleCount - 1) * LayoutMetrics::groupGap;
     return total;
 }
-
-// ── Internal group layout helpers ───────────────────────────────────────────
-
-namespace {
-// Lays out a label+control row and advances the content rect.
-void layoutLabelRow(juce::Rectangle<int>& content, juce::Label& label,
-                    juce::Component& control) {
-    auto row = content.removeFromTop(LayoutMetrics::rowHeight);
-    label.setBounds(row.removeFromLeft(LayoutMetrics::labelWidth));
-    control.setBounds(row);
-    content.removeFromTop(LayoutMetrics::rowGap);
-}
-} // namespace
 
 // ============================================================================
 // Layout
@@ -599,17 +506,6 @@ void PhuBarkFFTCompressorAudioProcessorEditor<SampleType>::resized() {
         auto row = content.removeFromTop(LayoutMetrics::rowHeight);
         smoothingLabel.setBounds(row.removeFromLeft(LayoutMetrics::labelWidth));
         smoothingSlider.setBounds(row);
-    }
-
-    // ── Transient Shaper group internals ────────────────────────────────
-    if (transientShaperGroup.isVisible()) {
-        auto content = transientShaperGroup.getBounds()
-                           .reduced(LayoutMetrics::groupPaddingH, LayoutMetrics::groupPaddingV);
-        layoutLabelRow(content, tsAttackLabel,     tsAttackSlider);
-        layoutLabelRow(content, tsSustainLabel,    tsSustainSlider);
-        layoutLabelRow(content, tsSensitivityLabel, tsSensitivitySlider);
-        auto row = content.removeFromTop(LayoutMetrics::rowHeight);
-        tsBypassToggle.setBounds(row);
     }
 
     // ── Display toggles group internals ─────────────────────────────────
