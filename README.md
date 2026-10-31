@@ -32,7 +32,7 @@ A VST3 spectral compressor that operates independently on each of the 24 psychoa
 
 ⚡ **Two FFT modes** — *Precision* mode uses a larger FFT window (2048 / 4096 samples) for fine frequency resolution; *Transient* mode uses a smaller window (1024 / 2048 samples) for tighter time-domain response. Both modes can be run with 50%, 75% or 90% overlap-add with a periodic Hann window for transparent reconstruction.
 
-🔎 **Integrated transient shaper** — a dual-envelope follower stage downstream of the compressor provides independent boost or cut of attack transients and sustained body (±24 dB each), with an adjustable detection sensitivity. The shaper can be bypassed independently.
+🔎 **Optional integrated transient shaper** (compile-time option `TRANSIENT_SHAPER`, off by default — see [Building](#building)) — a dual-envelope follower stage downstream of the compressor provides independent boost or cut of attack transients and sustained body (±24 dB each), with an adjustable detection sensitivity. The shaper can be bypassed independently.
 
 📊 **Live spectral display** — the spectrum view overlays the input and/or output FFT curve against colour-coded Bark band regions and the selected equal-loudness contour. A gain reduction bar below the spectrum shows per-band compression activity in real time using the same per-band colour coding.
 
@@ -67,7 +67,7 @@ A VST3 spectral compressor that operates independently on each of the 24 psychoa
 | Overlap  | 50%, 75% or 90% | Sets the overlap-add window for the FFT computations. Larger values provide better transient response while using mor CPU.
 | Smoothing Taps | 0 … 1 | IIR smoothing applied to per-band gain reduction updates, trading temporal response for stability. |
 
-**Transient Shaper group**
+**Transient Shaper group** (only present in builds configured with `-DTRANSIENT_SHAPER=ON`)
 
 | Parameter | Range | Description |
 |---|---|---|
@@ -100,6 +100,8 @@ A VST3 spectral compressor that operates independently on each of the 24 psychoa
 | Intel MKL | oneAPI or NuGet package intelmkl.static.win-x64 (optional) for FFT acceleration |
 
 **Intel MKL (optional):** If `MKLROOT` is set, the build automatically uses MKL's optimised FFT implementation. `MKLROOT` should point to either the oneAPI MKL root (`.../mkl/latest`) or the NuGet native root (`.../intelmkl.static.win-x64/<version>/build/native`). To disable MKL support, pass `-DUSE_INTEL_MKL=OFF` to CMake.
+
+**Transient Shaper (optional):** The transient shaper is excluded by default (`TRANSIENT_SHAPER=OFF`): no shaper DSP, parameters or UI group are compiled in, and the editor is correspondingly shorter. Pass `-DTRANSIENT_SHAPER=ON` at configure time to include the DSP stage, its four `ts_*` parameters and the Transient Shaper group; the editor height adjusts automatically. Presets or sessions saved with a shaper-enabled build load fine in a build without it, but the shaper settings are ignored.
 
 ### Clone
 

@@ -2,16 +2,21 @@
 
 #include "audio/AudioSampleFifo.h"
 #include "audio/BarkFFTCompressor.h"
-#include "audio/TransientShaper.h"
 #include "audio/WindowedRMS.h"
+#include "TransientShaperStage.h"
 #include <atomic>
 #include <juce_audio_processors/juce_audio_processors.h>
 
 using phu::audio::AudioSampleFifo;
 using phu::audio::BarkFFTCompressor;
-using phu::audio::TransientShaper;
 using phu::audio::WindowedRMS;
 
+/**
+ * PhuBarkFFTCompressorAudioProcessor — Bark-band FFT compressor plugin processor.
+ *
+ * Signal chain: input gain → BarkFFTCompressor → optional TransientShaperStage → output gain.
+ * The transient shaper is a no-op unless the plugin is built with TRANSIENT_SHAPER=ON.
+ */
 class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
   public:
     PhuBarkFFTCompressorAudioProcessor();
@@ -65,10 +70,6 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     static constexpr const char* PARAM_CONTOUR      = "contour_preset";
     static constexpr const char* PARAM_FFT_MODE     = "fft_mode";
     static constexpr const char* PARAM_OVERLAP_MODE  = "overlap_mode";
-    static constexpr const char* PARAM_TS_ATTACK    = "ts_attack_db";
-    static constexpr const char* PARAM_TS_SUSTAIN   = "ts_sustain_db";
-    static constexpr const char* PARAM_TS_SENSITIVITY = "ts_sensitivity";
-    static constexpr const char* PARAM_TS_BYPASS    = "ts_bypass";
     static constexpr const char* PARAM_SMOOTHING    = "smoothing";
     static constexpr const char* PARAM_INPUT_GAIN   = "input_gain";
     static constexpr const char* PARAM_OUTPUT_GAIN  = "output_gain";
@@ -91,10 +92,6 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
     std::atomic<float>* contourParam      = nullptr;
     std::atomic<float>* fftModeParam      = nullptr;
     std::atomic<float>* overlapModeParam   = nullptr;
-    std::atomic<float>* tsAttackParam     = nullptr;
-    std::atomic<float>* tsSustainParam    = nullptr;
-    std::atomic<float>* tsSensitivityParam = nullptr;
-    std::atomic<float>* tsBypassParam     = nullptr;
     std::atomic<float>* smoothingParam    = nullptr;
     std::atomic<float>* inputGainParam    = nullptr;
     std::atomic<float>* outputGainParam   = nullptr;
@@ -107,7 +104,7 @@ class PhuBarkFFTCompressorAudioProcessor : public juce::AudioProcessor {
 
     // Core DSP
     BarkFFTCompressor      m_compressor;
-    TransientShaper        m_transientShaper;
+    TransientShaperStage   m_transientShaperStage;  // post-compressor stage; empty when TRANSIENT_SHAPER=OFF
     juce::dsp::Gain<float> m_inputGain;
     juce::dsp::Gain<float> m_outputGain;
 

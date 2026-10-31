@@ -1,18 +1,21 @@
 #pragma once
 
 #include "audio/FFTProcessor.h"
+#include "EditorLayout.h"
 #include "LevelMeterComponent.h"
 #include "SpectrumDisplay.h"
+#include "TransientShaperUI.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 
 class PhuBarkFFTCompressorAudioProcessor;
 
-struct LayoutSection {
-    juce::Component* component  = nullptr;
-    int              preferredHeight = 0;
-    bool             visible    = true;
-};
-
+/**
+ * PhuBarkFFTCompressorAudioProcessorEditor — plugin editor.
+ *
+ * Stacks its sections (spectrum, gain reduction, level, compressor, optional Transient Shaper,
+ * display) top to bottom from the sections_ registry; the editor height is the sum of the
+ * registered sections, so an unregistered section needs no special handling.
+ */
 template <typename SampleType = float>
 class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEditor,
                                                   public juce::Timer {
@@ -24,6 +27,7 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     void resized() override;
     void timerCallback() override;
 
+    /** Sum of all visible section heights, group gaps and outer padding. */
     int computePreferredEditorHeight() const;
 
   private:
@@ -97,23 +101,9 @@ class PhuBarkFFTCompressorAudioProcessorEditor : public juce::AudioProcessorEdit
     juce::Label smoothingLabel;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> smoothingAttachment;
 
-    // ── Transient Shaper controls ────────────────────────────────────────
-    juce::GroupComponent transientShaperGroup;
-
-    juce::Slider tsAttackSlider;
-    juce::Label tsAttackLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tsAttackAttachment;
-
-    juce::Slider tsSustainSlider;
-    juce::Label tsSustainLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tsSustainAttachment;
-
-    juce::Slider tsSensitivitySlider;
-    juce::Label tsSensitivityLabel;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> tsSensitivityAttachment;
-
-    juce::ToggleButton tsBypassToggle;
-    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> tsBypassAttachment;
+    // Optional Transient Shaper panel; a no-op unless built with TRANSIENT_SHAPER=ON.
+    // Declared after audioProcessor, which supplies the APVTS it is constructed from.
+    TransientShaperUi transientShaperUi_;
 
     // ── FFT display controls ─────────────────────────────────────────────
     juce::GroupComponent displayGroup;

@@ -13,6 +13,7 @@ juce_add_plugin(phu-bark-fft-compressor
 )
 
 target_sources(phu-bark-fft-compressor PRIVATE
+    EditorLayout.h
     LevelMeterComponent.h
     PluginProcessor.cpp
     PluginProcessor.h
@@ -20,7 +21,24 @@ target_sources(phu-bark-fft-compressor PRIVATE
     PluginEditor.h
     SpectrumDisplay.cpp
     SpectrumDisplay.h
+    TransientShaperStage.h
+    TransientShaperUI.h
 )
+
+# Optional Transient Shaper (option TRANSIENT_SHAPER, default OFF). When OFF, none of the
+# shaper sources are compiled; the facade headers fall back to no-op stand-ins.
+if(TRANSIENT_SHAPER)
+    target_sources(phu-bark-fft-compressor PRIVATE
+        TransientShaperStage.cpp
+        TransientShaperPanel.cpp
+        TransientShaperPanel.h
+    )
+    target_compile_definitions(phu-bark-fft-compressor PRIVATE PHU_TRANSIENT_SHAPER=1)
+    message(STATUS "Transient Shaper: ON")
+else()
+    target_compile_definitions(phu-bark-fft-compressor PRIVATE PHU_TRANSIENT_SHAPER=0)
+    message(STATUS "Transient Shaper: OFF")
+endif()
 
 target_link_libraries(phu-bark-fft-compressor
     PRIVATE
