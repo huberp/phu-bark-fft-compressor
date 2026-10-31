@@ -35,9 +35,8 @@ jobs:
 
       - name: Install LaTeX SVG package
         run: |
-          tlmgr install svg
-          tlmgr install fontspec
-          tlmgr install unicode-math
+          tlmgr update --self
+          tlmgr install svg fontspec unicode-math
 
       - name: Install librsvg (for SVG support)
         run: sudo apt-get install -y librsvg2-bin

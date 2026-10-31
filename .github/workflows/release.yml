@@ -2,49 +2,134 @@ on:
   push:
     tags:
       - 'v[0-9]*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v1.2.3). Created on the selected branch/commit if it does not exist yet.'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Resolve the release tag; for manual runs create it if missing
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: Resolve release tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Resolve (and create) tag
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+
+          if ! [[ "$TAG" =~ ^v[0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "ERROR: tag '$TAG' must look like v1.2.3 (or v1.2.3-rc1)"
+            exit 1
+          fi
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if EXISTING=$(git rev-parse -q --verify "refs/tags/${TAG}^{commit}"); then
+              if [ "$EXISTING" != "$GITHUB_SHA" ]; then
+                echo "ERROR: tag $TAG already exists at $EXISTING, but this run is on $GITHUB_SHA."
+                echo "Run the workflow with the tag itself selected under 'Use workflow from'."
+                exit 1
+              fi
+              echo "Tag $TAG already exists at $GITHUB_SHA"
+            else
+              git tag "$TAG" "$GITHUB_SHA"
+              git push origin "refs/tags/$TAG"
+              echo "Created tag $TAG at $GITHUB_SHA"
+            fi
+          fi
+
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+  # ---------------------------------------------------------------------------
   # Build & package Windows x64 VST3
   # ---------------------------------------------------------------------------
   release-windows-x64:
     name: Windows x64 VST3
+    needs: prepare
     uses: ./.github/workflows/build-windows-vst3.yml
     with:
       arch: x64
       run-pluginval: true
       upload-artifact: true
       artifact-name: windows-x64-vst3
-      ref-name: ${{ github.ref_name }}
+      ref-name: ${{ needs.prepare.outputs.tag }}
 
   # ---------------------------------------------------------------------------
   # Build & package Windows ARM64 VST3 (cross-compiled on x64 runner)
   # ---------------------------------------------------------------------------
   release-windows-arm64:
     name: Windows ARM64 VST3
+    needs: prepare
     uses: ./.github/workflows/build-windows-vst3.yml
     with:
       arch: ARM64
       run-pluginval: false
       upload-artifact: true
       artifact-name: windows-arm64-vst3
-      ref-name: ${{ github.ref_name }}
+      ref-name: ${{ needs.prepare.outputs.tag }}
 
   # ---------------------------------------------------------------------------
   # Build & package Linux VST3
   # ---------------------------------------------------------------------------
   release-linux-x64:
     name: Linux x64 VST3
+    needs: prepare
     uses: ./.github/workflows/build-linux.yml
     with:
       arch: x64
       run-pluginval: true
       upload-artifact: true
       artifact-name: linux-x64-vst3
-      ref-name: ${{ github.ref_name }}
+      ref-name: ${{ needs.prepare.outputs.tag }}
+
+  # ---------------------------------------------------------------------------
+  # Build & package macOS VST3 + AU (Apple Silicon)
+  # ---------------------------------------------------------------------------
+  release-macos-arm64:
+    name: macOS arm64 VST3/AU
+    needs: prepare
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      arch: arm64
+      run-pluginval: true
+      upload-artifact: true
+      artifact-name: macos-arm64-plugin
+      ref-name: ${{ needs.prepare.outputs.tag }}
+
+  # ---------------------------------------------------------------------------
+  # Build & package macOS VST3 + AU (Intel)
+  # ---------------------------------------------------------------------------
+  release-macos-x64:
+    name: macOS x64 VST3/AU
+    needs: prepare
+    uses: ./.github/workflows/build-macos.yml
+    with:
+      arch: x64
+      run-pluginval: true
+      upload-artifact: true
+      artifact-name: macos-x64-plugin
+      ref-name: ${{ needs.prepare.outputs.tag }}
 
   # ---------------------------------------------------------------------------
   # Generate README.pdf
@@ -60,7 +145,7 @@ jobs:
   # ---------------------------------------------------------------------------
   publish-release:
     name: Publish GitHub Release
-    needs: [release-windows-x64, release-windows-arm64, release-linux-x64, generate-pdf]
+    needs: [prepare, release-windows-x64, release-windows-arm64, release-linux-x64, release-macos-arm64, release-macos-x64, generate-pdf]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -84,6 +169,18 @@ jobs:
           name: linux-x64-vst3
           path: dist/
 
+      - name: Download macOS arm64 artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: macos-arm64-plugin
+          path: dist/
+
+      - name: Download macOS x64 artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: macos-x64-plugin
+          path: dist/
+
       - name: Download README.pdf artifact
         uses: actions/download-artifact@v8
         with:
@@ -103,12 +200,12 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: ${{ github.ref_name }}
-          name: phu-bark-fft-compressor ${{ github.ref_name }}
+          tag_name: ${{ needs.prepare.outputs.tag }}
+          name: phu-bark-fft-compressor ${{ needs.prepare.outputs.tag }}
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(needs.prepare.outputs.tag, '-') }}
           body: |
-            ## phu-bark-fft-compressor ${{ github.ref_name }}
+            ## phu-bark-fft-compressor ${{ needs.prepare.outputs.tag }}
 
             ### Installation
 
@@ -121,7 +218,16 @@ jobs:
             **Linux x64** — download `PHU-BARK-FFT-COMPRESSOR-linux-x64-*.zip`, extract and copy
             `PHU BARK FFT COMPRESSOR.vst3` to `~/.vst3/`.
 
-            Each zip contains the `.vst3` bundle and a `README.pdf` with full documentation.
+            **macOS (Apple Silicon)** — download `PHU-BARK-FFT-COMPRESSOR-macos-arm64-*.zip`, extract and copy
+            `PHU BARK FFT COMPRESSOR.vst3` to `~/Library/Audio/Plug-Ins/VST3/` and
+            `PHU BARK FFT COMPRESSOR.component` to `~/Library/Audio/Plug-Ins/Components/`.
+
+            **macOS (Intel)** — download `PHU-BARK-FFT-COMPRESSOR-macos-x64-*.zip` and install as above.
+
+            > The macOS builds are not code-signed or notarized. If Gatekeeper blocks the plugin, run
+            > `xattr -dr com.apple.quarantine "<plugin bundle>"` on the extracted bundle.
+
+            Each zip contains the plugin bundle(s) and a `README.pdf` with full documentation.
 
             ### Prerequisite (Windows)
 
@@ -129,6 +235,6 @@ jobs:
 
             ### What's Changed
 
-            See [CHANGELOG](https://github.com/huberp/phu-bark-fft-compressor/commits/${{ github.ref_name }})
+            See [CHANGELOG](https://github.com/huberp/phu-bark-fft-compressor/commits/${{ needs.prepare.outputs.tag }})
             or compare against the previous tag.
           files: dist/*.zip
