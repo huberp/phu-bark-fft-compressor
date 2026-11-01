@@ -13,7 +13,7 @@ endif()
 # =============================================================================
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(PhuDependencies)
-phu_fetch_juce(TAG 8.0.15)
+phu_fetch_juce(TAG 9.0.4)
 phu_fetch_audio_lib(TAG main)
 
 # =============================================================================
